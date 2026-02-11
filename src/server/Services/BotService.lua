@@ -577,6 +577,49 @@ function BotService:_generateWanderTarget(currentPos, range)
     return self:_clampToMapBounds(target)
 end
 
+-- Jump Logic
+
+function BotService:_tryBotJump(bot, state, botRoot, humanoid, moveTarget, nearDist)
+    if bot.IsMinimalRig then
+        return
+    end
+
+    local now = os.clock()
+    if now < state.jump_ready_at then
+        return
+    end
+
+    -- Trigger 1: Proximity — target or threat is close
+    local proximityTrigger = nearDist and nearDist < Constants.BOT_JUMP_PROXIMITY_THRESHOLD
+
+    -- Trigger 2: Obstacle ahead via raycast
+    local obstacleTrigger = false
+    if moveTarget then
+        local moveDir = moveTarget - botRoot.Position
+        moveDir = Vector3.new(moveDir.X, 0, moveDir.Z)
+        if moveDir.Magnitude > 0.1 then
+            local rayOrigin = botRoot.Position + Vector3.new(0, 2, 0)
+            local rayDirection = moveDir.Unit * Constants.BOT_JUMP_RAYCAST_DISTANCE
+
+            local rayParams = RaycastParams.new()
+            rayParams.FilterType = Enum.RaycastFilterType.Exclude
+            rayParams.FilterDescendantsInstances = { bot.Character }
+
+            local result = Workspace:Raycast(rayOrigin, rayDirection, rayParams)
+            if result and result.Instance.Name ~= "Baseplate" then
+                obstacleTrigger = true
+            end
+        end
+    end
+
+    if not (proximityTrigger or obstacleTrigger) then
+        return
+    end
+
+    humanoid.Jump = true
+    state.jump_ready_at = now + Constants.BOT_JUMP_COOLDOWN * bot.PersonalityStats.jump_cooldown_mult
+end
+
 -- AI Control
 
 function BotService:StartAI(bot, role, roundState)
@@ -601,6 +644,7 @@ function BotService:StartAI(bot, role, roundState)
         last_position = nil,
         stuck_since = 0,
         recovery_attempts = 0,
+        jump_ready_at = 0,
     }
     bot.RunnerState = {
         wander_target = nil,
@@ -611,6 +655,7 @@ function BotService:StartAI(bot, role, roundState)
         last_position = nil,
         stuck_since = 0,
         recovery_attempts = 0,
+        jump_ready_at = 0,
     }
 
     print("[BotService] Starting AI for", bot.Name, "as", role, "(" .. bot.Personality .. ")")
@@ -788,8 +833,11 @@ function BotService:_taggerAI(bot, roundState)
             self:_playBotAnimation(bot, "run")
             self:_moveBot(bot, targetPos + offset)
 
-            -- Tag check
+            -- Jump when close to target or obstacle ahead
             local dist = (state.committed_target.Position - botRoot.Position).Magnitude
+            self:_tryBotJump(bot, state, botRoot, humanoid, targetPos, dist)
+
+            -- Tag check
             if dist <= Constants.TAG_RANGE and self._roundService then
                 self._roundService:BotTag(bot, state.committed_target.Parent)
             end
@@ -893,6 +941,9 @@ function BotService:_runnerAI(bot, roundState)
             local fleeTarget = self:_clampToMapBounds(botRoot.Position + fleeDir * 20 + randomOffset)
 
             self:_moveBot(bot, fleeTarget)
+
+            -- Jump when threat is close or obstacle ahead while fleeing
+            self:_tryBotJump(bot, state, botRoot, humanoid, fleeTarget, state.last_threat_dist)
         else
             -- Wander with persistence
             self:_playBotAnimation(bot, "walk")

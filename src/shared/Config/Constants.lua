@@ -69,6 +69,9 @@ Constants.BOT_RANDOM_OFFSET = 15 -- Random movement variation for organic feel
 Constants.BOT_MAP_BOUNDS = 35 -- Effective play area for bot AI (±studs from center)
 Constants.BOT_STUCK_CHECK_INTERVAL = 2 -- Seconds before declaring a bot stuck
 Constants.BOT_STUCK_THRESHOLD = 1 -- Minimum studs of movement to not be "stuck"
+Constants.BOT_JUMP_COOLDOWN = 0.8 -- Base seconds between jumps (modified by personality)
+Constants.BOT_JUMP_PROXIMITY_THRESHOLD = 15 -- Distance (studs) to trigger proximity jump
+Constants.BOT_JUMP_RAYCAST_DISTANCE = 8 -- How far ahead to raycast for obstacles (studs)
 Constants.BOT_NAMES = { "Bolt", "Dash", "Flash", "Blitz", "Zippy", "Turbo", "Rocket", "Swift", "Storm", "Spark" }
 
 -- Bot reaction delays (seconds before acting on new information)
@@ -95,6 +98,7 @@ Constants.PERSONALITY_STATS = {
         target_commit_secs = 0.9,
         speed_mult = 0.85,
         flee_distance_mult = 1.4,
+        jump_cooldown_mult = 1.5,
     },
     Bold = {
         reaction_delay_mult = 0.7,
@@ -102,6 +106,7 @@ Constants.PERSONALITY_STATS = {
         target_commit_secs = 2.0,
         speed_mult = 1.15,
         flee_distance_mult = 0.7,
+        jump_cooldown_mult = 0.6,
     },
     Tricky = {
         reaction_delay_mult = 0.9,
@@ -109,6 +114,7 @@ Constants.PERSONALITY_STATS = {
         target_commit_secs = 1.2,
         speed_mult = 1.0,
         flee_distance_mult = 1.0,
+        jump_cooldown_mult = 1.0,
     },
 }
 
