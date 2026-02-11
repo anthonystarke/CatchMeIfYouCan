@@ -45,6 +45,11 @@ local function onPlayerAdded(player)
     local function onCharacterAdded(character)
         local humanoid = character:WaitForChild("Humanoid")
         humanoid.WalkSpeed = Constants.DEFAULT_WALK_SPEED
+
+        -- Teleport to lobby on spawn/respawn
+        task.defer(function()
+            MapService:TeleportToLobby(player)
+        end)
     end
 
     if player.Character then

@@ -20,15 +20,19 @@ local MAP_DEFINITIONS = {
         name = "Playground Panic",
         mapId = "playground_panic",
         size = 120,
-        runnerSpawns = {
-            Vector3.new(-15, 5, -15),
-            Vector3.new(15, 5, -15),
-            Vector3.new(-15, 5, 15),
-            Vector3.new(15, 5, 15),
-            Vector3.new(-20, 5, 0),
-            Vector3.new(20, 5, 0),
+        runnerSpawn = Vector3.new(0, 5, 0),
+        taggerSpawns = {
+            Vector3.new(50, 5, 0),      -- 0°
+            Vector3.new(-25, 5, 43),     -- 120°
+            Vector3.new(-25, 5, -43),    -- 240°
         },
-        taggerSpawn = Vector3.new(0, 5, 0),
+        lobbySpawns = {
+            Vector3.new(-5, Constants.LOBBY_HEIGHT + 1, -5),
+            Vector3.new(5, Constants.LOBBY_HEIGHT + 1, -5),
+            Vector3.new(-5, Constants.LOBBY_HEIGHT + 1, 5),
+            Vector3.new(5, Constants.LOBBY_HEIGHT + 1, 5),
+            Vector3.new(0, Constants.LOBBY_HEIGHT + 1, 0),
+        },
         obstacles = {
             { pos = Vector3.new(-20, 3, 0), size = Vector3.new(12, 6, 12), color = Color3.fromRGB(255, 120, 80) },
             { pos = Vector3.new(20, 3, -20), size = Vector3.new(10, 6, 10), color = Color3.fromRGB(80, 200, 120) },
@@ -133,9 +137,18 @@ function MapService:_buildMap(definition)
     spawnsFolder.Name = "Spawns"
     spawnsFolder.Parent = mapFolder
 
-    for i, pos in ipairs(definition.runnerSpawns) do
+    local runnerMarker = Instance.new("Part")
+    runnerMarker.Name = "RunnerSpawn"
+    runnerMarker.Size = Vector3.new(1, 1, 1)
+    runnerMarker.Position = definition.runnerSpawn
+    runnerMarker.Anchored = true
+    runnerMarker.CanCollide = false
+    runnerMarker.Transparency = 1
+    runnerMarker.Parent = spawnsFolder
+
+    for i, pos in ipairs(definition.taggerSpawns) do
         local marker = Instance.new("Part")
-        marker.Name = "RunnerSpawn_" .. i
+        marker.Name = "TaggerSpawn_" .. i
         marker.Size = Vector3.new(1, 1, 1)
         marker.Position = pos
         marker.Anchored = true
@@ -144,14 +157,58 @@ function MapService:_buildMap(definition)
         marker.Parent = spawnsFolder
     end
 
-    local taggerMarker = Instance.new("Part")
-    taggerMarker.Name = "TaggerSpawn"
-    taggerMarker.Size = Vector3.new(1, 1, 1)
-    taggerMarker.Position = definition.taggerSpawn
-    taggerMarker.Anchored = true
-    taggerMarker.CanCollide = false
-    taggerMarker.Transparency = 1
-    taggerMarker.Parent = spawnsFolder
+    -- Lobby spawn markers
+    for i, pos in ipairs(definition.lobbySpawns) do
+        local marker = Instance.new("Part")
+        marker.Name = "LobbySpawn_" .. i
+        marker.Size = Vector3.new(1, 1, 1)
+        marker.Position = pos
+        marker.Anchored = true
+        marker.CanCollide = false
+        marker.Transparency = 1
+        marker.Parent = spawnsFolder
+    end
+
+    -- Lobby platform (above arena)
+    local lobbyFolder = Instance.new("Folder")
+    lobbyFolder.Name = "Lobby"
+    lobbyFolder.Parent = mapFolder
+
+    local lobbySize = Constants.LOBBY_SIZE
+    local lobbyY = Constants.LOBBY_HEIGHT
+
+    -- Lobby floor
+    local lobbyFloor = Instance.new("Part")
+    lobbyFloor.Name = "LobbyFloor"
+    lobbyFloor.Size = Vector3.new(lobbySize, 1, lobbySize)
+    lobbyFloor.Position = Vector3.new(0, lobbyY - 0.5, 0)
+    lobbyFloor.Anchored = true
+    lobbyFloor.Material = Enum.Material.SmoothPlastic
+    lobbyFloor.Color = Color3.fromRGB(180, 180, 220)
+    lobbyFloor.Parent = lobbyFolder
+
+    -- Lobby walls (prevent falling)
+    local lobbyHalf = lobbySize / 2
+    local lobbyWallHeight = 8
+    local lobbyWalls = {
+        { pos = Vector3.new(lobbyHalf, lobbyY + lobbyWallHeight / 2, 0), size = Vector3.new(1, lobbyWallHeight, lobbySize) },
+        { pos = Vector3.new(-lobbyHalf, lobbyY + lobbyWallHeight / 2, 0), size = Vector3.new(1, lobbyWallHeight, lobbySize) },
+        { pos = Vector3.new(0, lobbyY + lobbyWallHeight / 2, lobbyHalf), size = Vector3.new(lobbySize + 2, lobbyWallHeight, 1) },
+        { pos = Vector3.new(0, lobbyY + lobbyWallHeight / 2, -lobbyHalf), size = Vector3.new(lobbySize + 2, lobbyWallHeight, 1) },
+    }
+
+    for i, wallData in ipairs(lobbyWalls) do
+        local wall = Instance.new("Part")
+        wall.Name = "LobbyWall_" .. i
+        wall.Size = wallData.size
+        wall.Position = wallData.pos
+        wall.Anchored = true
+        wall.Transparency = 0.5
+        wall.CanCollide = true
+        wall.Material = Enum.Material.Glass
+        wall.Color = Color3.fromRGB(200, 200, 255)
+        wall.Parent = lobbyFolder
+    end
 
     return {
         Model = mapFolder,
@@ -174,28 +231,63 @@ function MapService:TeleportPlayerToSpawn(player, role)
     local targetPos = nil
 
     if role == Constants.ROLES.TAGGER then
-        local taggerSpawn = spawnsFolder:FindFirstChild("TaggerSpawn")
-        if taggerSpawn then
-            targetPos = taggerSpawn.Position + Vector3.new(0, 3, 0)
-        end
-    else
-        -- Pick a random runner spawn
-        local runnerSpawns = {}
+        -- Pick a random tagger spawn from the circle
+        local taggerSpawns = {}
         for _, child in ipairs(spawnsFolder:GetChildren()) do
-            if child.Name:match("^RunnerSpawn_") then
-                table.insert(runnerSpawns, child)
+            if child.Name:match("^TaggerSpawn_") then
+                table.insert(taggerSpawns, child)
             end
         end
 
-        if #runnerSpawns > 0 then
-            local randomSpawn = runnerSpawns[math.random(#runnerSpawns)]
+        if #taggerSpawns > 0 then
+            local randomSpawn = taggerSpawns[math.random(#taggerSpawns)]
             targetPos = randomSpawn.Position + Vector3.new(0, 3, 0)
+        end
+    else
+        -- Runner spawns at center
+        local runnerSpawn = spawnsFolder:FindFirstChild("RunnerSpawn")
+        if runnerSpawn then
+            targetPos = runnerSpawn.Position + Vector3.new(0, 3, 0)
         end
     end
 
     if not targetPos then
         return false
     end
+
+    local humanoidRootPart = player.Character:FindFirstChild("HumanoidRootPart")
+    if humanoidRootPart then
+        humanoidRootPart.CFrame = CFrame.new(targetPos)
+        return true
+    end
+
+    return false
+end
+
+function MapService:TeleportToLobby(player)
+    if not player or not player.Character then
+        return false
+    end
+
+    local map = self:GetOrCreateMap()
+    if not map then
+        return false
+    end
+
+    local spawnsFolder = map.SpawnsFolder
+    local lobbySpawns = {}
+    for _, child in ipairs(spawnsFolder:GetChildren()) do
+        if child.Name:match("^LobbySpawn_") then
+            table.insert(lobbySpawns, child)
+        end
+    end
+
+    if #lobbySpawns == 0 then
+        return false
+    end
+
+    local randomSpawn = lobbySpawns[math.random(#lobbySpawns)]
+    local targetPos = randomSpawn.Position + Vector3.new(0, 3, 0)
 
     local humanoidRootPart = player.Character:FindFirstChild("HumanoidRootPart")
     if humanoidRootPart then

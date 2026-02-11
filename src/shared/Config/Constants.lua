@@ -57,6 +57,10 @@ Constants.COINS_PER_TAG = 5
 Constants.COINS_PER_WIN = 25
 Constants.COINS_PER_ROUND = 10
 
+-- Lobby
+Constants.LOBBY_HEIGHT = 100 -- Y position of lobby platform above arena
+Constants.LOBBY_SIZE = 30 -- Size of the lobby platform (studs)
+
 -- Bots
 Constants.BOT_FILL_TARGET = 4 -- Auto-fill games to this many total participants
 Constants.BOT_UPDATE_INTERVAL = 0.3 -- AI decision frequency (seconds)

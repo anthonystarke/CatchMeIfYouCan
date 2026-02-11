@@ -245,8 +245,11 @@ function RoundService:_roundLoop()
         BotService:StopAllAI()
         task.wait(Constants.RESULTS_DISPLAY_TIME)
 
-        -- Intermission phase
+        -- Intermission phase: teleport all players back to lobby
         self:_setPhase(Constants.PHASES.INTERMISSION)
+        for _, participant in ipairs(self:_getParticipants()) do
+            MapService:TeleportToLobby(participant)
+        end
         for i = Constants.INTERMISSION_TIME, 1, -1 do
             self._roundStateEvent:FireAllClients({
                 phase = Constants.PHASES.INTERMISSION,
