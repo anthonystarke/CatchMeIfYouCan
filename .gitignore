@@ -1,0 +1,31 @@
+# Roblox
+*.rbxl
+*.rbxlx
+*.rbxm
+*.rbxmx
+
+# Rojo
+rojo.lock
+*.rbxl.lock
+*.rbxlx.lock
+
+# Toolchain
+.aftman/
+.rokit/
+
+# OS files
+.DS_Store
+Thumbs.db
+nul
+
+# Editor
+.vscode/
+*.swp
+*.swo
+
+# Logs
+*.log
+
+# Build output
+build/
+out/

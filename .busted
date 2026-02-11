@@ -1,0 +1,40 @@
+-- Busted configuration file
+return {
+    default = {
+        -- Test file pattern
+        pattern = "_spec",
+
+        -- Directories to search for tests
+        ROOT = { "tests/shared" },
+
+        -- Helper file to run before tests (sets up mocks and paths)
+        helper = "tests/init.lua",
+
+        -- Output format
+        output = "utfTerminal",
+
+        -- Enable verbose output
+        verbose = true,
+
+        -- Shuffle test order for better isolation
+        shuffle = false,
+    },
+
+    -- Quick run configuration (fewer tests, faster feedback)
+    quick = {
+        pattern = "_spec",
+        ROOT = { "tests/shared" },
+        helper = "tests/init.lua",
+        output = "utfTerminal",
+        verbose = false,
+    },
+
+    -- CI configuration (for continuous integration)
+    ci = {
+        pattern = "_spec",
+        ROOT = { "tests/shared" },
+        helper = "tests/init.lua",
+        output = "TAP",
+        verbose = true,
+    },
+}
