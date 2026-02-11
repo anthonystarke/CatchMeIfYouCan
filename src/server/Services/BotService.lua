@@ -10,8 +10,10 @@ local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerStorage = game:GetService("ServerStorage")
 
+local Services = script.Parent
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Constants = require(Shared:WaitForChild("Config"):WaitForChild("Constants"))
+local MapService = require(Services:WaitForChild("MapService"))
 
 local BotService = {}
 
@@ -219,6 +221,9 @@ function BotService:SpawnBot()
     if not isMinimalRig then
         self:_setupAnimations(bot)
     end
+
+    -- Place bot in lobby (same lifecycle as players)
+    MapService:TeleportToLobby(bot)
 
     print("[BotService] Spawned bot:", botName, "(ID:", botId, ") personality:", personality, "minimal:", isMinimalRig)
     return bot
