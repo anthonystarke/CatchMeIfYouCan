@@ -35,7 +35,7 @@ Constants.INTERMISSION_TIME = 10
 -- Player counts
 Constants.MIN_PLAYERS = 2
 Constants.MAX_PLAYERS = 12
-Constants.TAGGERS_PER_ROUND = 1
+Constants.TAGGERS_PER_ROUND = 3
 
 -- Movement
 Constants.DEFAULT_WALK_SPEED = 16
@@ -60,9 +60,11 @@ Constants.COINS_PER_ROUND = 10
 -- Bots
 Constants.BOT_FILL_TARGET = 4 -- Auto-fill games to this many total participants
 Constants.BOT_UPDATE_INTERVAL = 0.3 -- AI decision frequency (seconds)
-Constants.BOT_FLEE_DISTANCE = 40 -- How far runner bots flee from tagger
+Constants.BOT_FLEE_DISTANCE = 60 -- How far runner bots flee from tagger
 Constants.BOT_RANDOM_OFFSET = 15 -- Random movement variation for organic feel
 Constants.BOT_MAP_BOUNDS = 35 -- Effective play area for bot AI (±studs from center)
+Constants.BOT_STUCK_CHECK_INTERVAL = 2 -- Seconds before declaring a bot stuck
+Constants.BOT_STUCK_THRESHOLD = 1 -- Minimum studs of movement to not be "stuck"
 Constants.BOT_NAMES = { "Bolt", "Dash", "Flash", "Blitz", "Zippy", "Turbo", "Rocket", "Swift", "Storm", "Spark" }
 
 -- Bot reaction delays (seconds before acting on new information)

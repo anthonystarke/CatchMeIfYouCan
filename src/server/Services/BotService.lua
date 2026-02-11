@@ -13,8 +13,6 @@ local ServerStorage = game:GetService("ServerStorage")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Constants = require(Shared:WaitForChild("Config"):WaitForChild("Constants"))
 
-local PathfindingService = game:GetService("PathfindingService")
-
 local BotService = {}
 
 -- State
@@ -569,39 +567,8 @@ function BotService:_moveBotPivot(bot, targetPos)
     bot.Character:PivotTo(CFrame.new(newPos, newPos + moveDir))
 end
 
--- PathfindingService Navigation
-
+-- Direct movement: move straight toward target position
 function BotService:_navigateTo(bot, targetPos)
-    local botRoot = bot.Character and bot.Character:FindFirstChild("HumanoidRootPart")
-    if not botRoot then
-        return
-    end
-
-    local success, path = pcall(function()
-        local p = PathfindingService:CreatePath({
-            AgentRadius = 2,
-            AgentHeight = 5,
-            AgentCanJump = false,
-        })
-        p:ComputeAsync(botRoot.Position, targetPos)
-        return p
-    end)
-
-    if success and path and path.Status == Enum.PathStatus.Success then
-        local wpSuccess, waypoints = pcall(function()
-            return path:GetWaypoints()
-        end)
-        if wpSuccess and waypoints and #waypoints >= 1 then
-            -- Move toward the second waypoint (first is current position)
-            local nextWaypoint = waypoints[2] or waypoints[1]
-            if nextWaypoint then
-                self:_moveBot(bot, nextWaypoint.Position)
-                return
-            end
-        end
-    end
-
-    -- Fallback to direct movement if pathfinding fails
     self:_moveBot(bot, targetPos)
 end
 
@@ -610,6 +577,15 @@ end
 function BotService:StartAI(bot, role, roundState)
     self:StopAI(bot)
 
+    -- Ensure HumanoidRootPart is unanchored for proper rigs so MoveTo works.
+    -- Can be left anchored from a previous round's freeze.
+    if not bot.IsMinimalRig then
+        local root = bot.Character and bot.Character:FindFirstChild("HumanoidRootPart")
+        if root then
+            root.Anchored = false
+        end
+    end
+
     -- Reset AI state for new round
     bot.TaggerState = {
         committed_target = nil,
@@ -617,6 +593,9 @@ function BotService:StartAI(bot, role, roundState)
         reaction_ready_at = 0,
         wander_target = nil,
         wander_started = 0,
+        last_position = nil,
+        stuck_since = 0,
+        recovery_attempts = 0,
     }
     bot.RunnerState = {
         wander_target = nil,
@@ -624,6 +603,9 @@ function BotService:StartAI(bot, role, roundState)
         reaction_ready_at = 0,
         last_threat = nil,
         last_threat_dist = math.huge,
+        last_position = nil,
+        stuck_since = 0,
+        recovery_attempts = 0,
     }
 
     print("[BotService] Starting AI for", bot.Name, "as", role, "(" .. bot.Personality .. ")")
@@ -661,6 +643,71 @@ function BotService:StopAllAI()
     end
 end
 
+-- Stuck Detection: returns true if bot hasn't moved and performs recovery
+function BotService:_checkAndRecoverStuck(bot, state, botRoot)
+    if not botRoot or not botRoot.Parent then
+        return false
+    end
+
+    local now = os.clock()
+    local currentPos = botRoot.Position
+
+    if not state.last_position then
+        state.last_position = currentPos
+        state.stuck_since = now
+        state.recovery_attempts = 0
+        return false
+    end
+
+    local moved = (currentPos - state.last_position).Magnitude
+    if moved >= Constants.BOT_STUCK_THRESHOLD then
+        -- Bot moved, reset stuck timer and recovery counter
+        state.last_position = currentPos
+        state.stuck_since = now
+        state.recovery_attempts = 0
+        return false
+    end
+
+    -- Bot hasn't moved enough — check if stuck long enough to recover
+    if (now - state.stuck_since) < Constants.BOT_STUCK_CHECK_INTERVAL then
+        return false
+    end
+
+    -- Stuck! Attempt recovery
+    state.recovery_attempts = (state.recovery_attempts or 0) + 1
+    warn("[BotService]", bot.Name, "stuck at", currentPos, "- recovery attempt", state.recovery_attempts)
+
+    -- 1. Unanchor root (most common cause for humanoid rigs, safe for all)
+    botRoot.Anchored = false
+
+    -- 2. Nudge position to escape physics wedges; escalate after repeated failures
+    local nudgeScale = state.recovery_attempts > 3 and 12 or 4
+    local jitter = Vector3.new(
+        (math.random() - 0.5) * nudgeScale,
+        0,
+        (math.random() - 0.5) * nudgeScale
+    )
+    local nudgedPos = currentPos + jitter
+    nudgedPos = Vector3.new(
+        math.clamp(nudgedPos.X, -Constants.BOT_MAP_BOUNDS, Constants.BOT_MAP_BOUNDS),
+        currentPos.Y,
+        math.clamp(nudgedPos.Z, -Constants.BOT_MAP_BOUNDS, Constants.BOT_MAP_BOUNDS)
+    )
+
+    if bot.IsMinimalRig then
+        bot.Character:PivotTo(CFrame.new(nudgedPos))
+    else
+        botRoot.CFrame = CFrame.new(nudgedPos)
+    end
+
+    -- 3. Reset tracking so we give the recovery a chance
+    state.last_position = nudgedPos
+    state.stuck_since = now
+    state.wander_target = nil
+
+    return true
+end
+
 function BotService:_taggerAI(bot, roundState)
     local humanoid = bot.Character and bot.Character:FindFirstChild("Humanoid")
     if not humanoid then
@@ -683,6 +730,9 @@ function BotService:_taggerAI(bot, roundState)
 
         local now = os.clock()
         local state = bot.TaggerState
+
+        -- Stuck detection: recover if bot hasn't moved
+        self:_checkAndRecoverStuck(bot, state, botRoot)
 
         -- Reassess targets on reaction timer
         if now >= state.reaction_ready_at then
@@ -798,6 +848,9 @@ function BotService:_runnerAI(bot, roundState)
         local now = os.clock()
         local state = bot.RunnerState
 
+        -- Stuck detection: recover if bot hasn't moved
+        self:_checkAndRecoverStuck(bot, state, botRoot)
+
         -- Threat assessment on reaction timer
         if now >= state.reaction_ready_at then
             local nearestTagger = nil
@@ -829,22 +882,30 @@ function BotService:_runnerAI(bot, roundState)
         local fleeThreshold = Constants.BOT_FLEE_DISTANCE * stats.flee_distance_mult
 
         if state.last_threat and state.last_threat.Parent and state.last_threat_dist < fleeThreshold then
-            -- Flee: clear wander target, run away
+            -- Flee: run directly away from tagger
             state.wander_target = nil
             self:_playBotAnimation(bot, "run")
 
-            local fleeDirection = (botRoot.Position - state.last_threat.Position).Unit
+            local fleeDir = (botRoot.Position - state.last_threat.Position)
+            fleeDir = Vector3.new(fleeDir.X, 0, fleeDir.Z)
+            if fleeDir.Magnitude > 0.1 then
+                fleeDir = fleeDir.Unit
+            else
+                fleeDir = Vector3.new(math.random() - 0.5, 0, math.random() - 0.5).Unit
+            end
+
             local randomOffset = Vector3.new(
                 (math.random() - 0.5) * Constants.BOT_RANDOM_OFFSET,
                 0,
                 (math.random() - 0.5) * Constants.BOT_RANDOM_OFFSET
             )
-            local fleeTarget = botRoot.Position + fleeDirection * 20 + randomOffset
+            local fleeTarget = botRoot.Position + fleeDir * 20 + randomOffset
             fleeTarget = Vector3.new(
                 math.clamp(fleeTarget.X, -Constants.BOT_MAP_BOUNDS, Constants.BOT_MAP_BOUNDS),
                 fleeTarget.Y,
                 math.clamp(fleeTarget.Z, -Constants.BOT_MAP_BOUNDS, Constants.BOT_MAP_BOUNDS)
             )
+
             self:_navigateTo(bot, fleeTarget)
         else
             -- Wander with persistence
