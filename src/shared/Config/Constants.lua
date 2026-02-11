@@ -26,7 +26,7 @@ Constants.DEFAULT_COINS = 100
 Constants.DEFAULT_GEMS = 10
 
 -- Round timing (seconds)
-Constants.LOBBY_WAIT_TIME = 15
+Constants.LOBBY_WAIT_TIME = 5
 Constants.COUNTDOWN_TIME = 5
 Constants.ROUND_DURATION = 120
 Constants.RESULTS_DISPLAY_TIME = 8
@@ -63,6 +63,47 @@ Constants.BOT_UPDATE_INTERVAL = 0.3 -- AI decision frequency (seconds)
 Constants.BOT_FLEE_DISTANCE = 40 -- How far runner bots flee from tagger
 Constants.BOT_RANDOM_OFFSET = 15 -- Random movement variation for organic feel
 Constants.BOT_NAMES = { "Bolt", "Dash", "Flash", "Blitz", "Zippy", "Turbo", "Rocket", "Swift", "Storm", "Spark" }
+
+-- Bot reaction delays (seconds before acting on new information)
+Constants.BOT_REACTION_DELAY_TAGGER = 0.15
+Constants.BOT_REACTION_DELAY_RUNNER = 0.25
+
+-- Bot personalities
+Constants.BOT_PERSONALITIES = {
+    CAUTIOUS = "Cautious",
+    BOLD = "Bold",
+    TRICKY = "Tricky",
+}
+
+-- Personality stat modifiers
+-- reaction_delay_mult: applied to base reaction delay (>1 = slower to react)
+-- wander_persist_secs: how long to commit to a wander target (seconds)
+-- target_commit_secs: how long tagger commits to chasing one target (seconds)
+-- speed_mult: multiplier for humanoid.WalkSpeed
+-- flee_distance_mult: multiplier for BOT_FLEE_DISTANCE threshold
+Constants.PERSONALITY_STATS = {
+    Cautious = {
+        reaction_delay_mult = 1.3,
+        wander_persist_secs = 2.5,
+        target_commit_secs = 0.9,
+        speed_mult = 0.85,
+        flee_distance_mult = 1.4,
+    },
+    Bold = {
+        reaction_delay_mult = 0.7,
+        wander_persist_secs = 1.0,
+        target_commit_secs = 2.0,
+        speed_mult = 1.15,
+        flee_distance_mult = 0.7,
+    },
+    Tricky = {
+        reaction_delay_mult = 0.9,
+        wander_persist_secs = 1.8,
+        target_commit_secs = 1.2,
+        speed_mult = 1.0,
+        flee_distance_mult = 1.0,
+    },
+}
 
 -- Bot animation fallback IDs (used when ServerStorage animations can't be loaded)
 -- R15 defaults

@@ -68,18 +68,52 @@ function RoundService:Start()
     end)
 end
 
-function RoundService:GetRoundState()
-    return {
-        phase = self._currentPhase,
-        roundState = self._roundState,
-        timeRemaining = self._roundTimer,
-    }
-end
-
 -- Safe bot check: Roblox Player instances throw on invalid property access,
 -- so we check the type first. Bots are plain Lua tables, players are Instances.
 local function isBot(participant)
     return typeof(participant) == "table" and participant.IsBot == true
+end
+
+function RoundService:GetRoundState()
+    return {
+        phase = self._currentPhase,
+        roundState = self:_getClientRoundState(),
+        timeRemaining = self._roundTimer,
+    }
+end
+
+-- Create a client-safe copy of roundState with only the fields clients need.
+-- Bot objects contain server-only data (PersonalityStats, AI state, math.huge)
+-- that can fail RemoteEvent serialization.
+function RoundService:_getClientRoundState()
+    if not self._roundState then
+        return nil
+    end
+
+    local function sanitizeParticipant(p)
+        if isBot(p) then
+            return { UserId = p.UserId, Name = p.Name, Character = p.Character }
+        end
+        return p -- Real players serialize fine as-is
+    end
+
+    local clientTaggers = {}
+    for _, t in ipairs(self._roundState.Taggers) do
+        table.insert(clientTaggers, sanitizeParticipant(t))
+    end
+
+    local clientRunners = {}
+    for _, r in ipairs(self._roundState.Runners) do
+        table.insert(clientRunners, sanitizeParticipant(r))
+    end
+
+    return {
+        Taggers = clientTaggers,
+        Runners = clientRunners,
+        TaggedPlayers = self._roundState.TaggedPlayers,
+        RoundStartTime = self._roundState.RoundStartTime,
+        RoundEndTime = self._roundState.RoundEndTime,
+    }
 end
 
 -- Get all participants (real players + bots)
@@ -266,11 +300,12 @@ function RoundService:_playRound()
     end
 
     -- Notify real clients of role assignments (bots don't need UI)
+    local clientRoundState = self:_getClientRoundState()
     for _, participant in ipairs(taggers) do
         self:_fireClient(participant, {
             phase = Constants.PHASES.PLAYING,
             role = Constants.ROLES.TAGGER,
-            roundState = self._roundState,
+            roundState = clientRoundState,
         })
     end
 
@@ -278,7 +313,7 @@ function RoundService:_playRound()
         self:_fireClient(participant, {
             phase = Constants.PHASES.PLAYING,
             role = Constants.ROLES.RUNNER,
-            roundState = self._roundState,
+            roundState = clientRoundState,
         })
     end
 
@@ -320,7 +355,7 @@ function RoundService:_playRound()
         self._roundStateEvent:FireAllClients({
             phase = Constants.PHASES.PLAYING,
             timeRemaining = self._roundTimer,
-            roundState = self._roundState,
+            roundState = self:_getClientRoundState(),
         })
 
         -- Check if all runners are tagged
@@ -424,7 +459,7 @@ function RoundService:_handleTag(tagger, targetUserId)
             tagger = tagger.UserId,
             tagged = targetUserId,
         },
-        roundState = self._roundState,
+        roundState = self:_getClientRoundState(),
     })
 end
 
