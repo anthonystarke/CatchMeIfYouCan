@@ -189,7 +189,7 @@ function MapService:_buildMap(definition)
 
     -- Lobby walls (prevent falling)
     local lobbyHalf = lobbySize / 2
-    local lobbyWallHeight = 8
+    local lobbyWallHeight = 16
     local lobbyWalls = {
         { pos = Vector3.new(lobbyHalf, lobbyY + lobbyWallHeight / 2, 0), size = Vector3.new(1, lobbyWallHeight, lobbySize) },
         { pos = Vector3.new(-lobbyHalf, lobbyY + lobbyWallHeight / 2, 0), size = Vector3.new(1, lobbyWallHeight, lobbySize) },
