@@ -210,6 +210,18 @@ function MapService:_buildMap(definition)
         wall.Parent = lobbyFolder
     end
 
+    -- Lobby ceiling (prevent jumping out)
+    local lobbyCeiling = Instance.new("Part")
+    lobbyCeiling.Name = "LobbyCeiling"
+    lobbyCeiling.Size = Vector3.new(lobbySize + 2, 1, lobbySize + 2)
+    lobbyCeiling.Position = Vector3.new(0, lobbyY + lobbyWallHeight + 0.5, 0)
+    lobbyCeiling.Anchored = true
+    lobbyCeiling.Transparency = 0.5
+    lobbyCeiling.CanCollide = true
+    lobbyCeiling.Material = Enum.Material.Glass
+    lobbyCeiling.Color = Color3.fromRGB(200, 200, 255)
+    lobbyCeiling.Parent = lobbyFolder
+
     return {
         Model = mapFolder,
         Definition = definition,
