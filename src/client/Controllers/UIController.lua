@@ -60,19 +60,26 @@ function UIController:_createHUD()
     self:_createStatusDisplay()
 end
 
-function UIController:_createTimerDisplay()
+-- Helper: create a styled HUD container with rounded corners
+function UIController:_createHUDContainer(name, size, position, cornerRadius, transparency)
     local container = Instance.new("Frame")
-    container.Name = "TimerContainer"
-    container.Size = UDim2.new(0, 160, 0, 50)
-    container.Position = UDim2.new(0.5, -80, 0, 10)
+    container.Name = name
+    container.Size = size
+    container.Position = position
     container.BackgroundColor3 = GameConfig.StateBackgrounds.Dark
-    container.BackgroundTransparency = 0.3
+    container.BackgroundTransparency = transparency or 0.3
     container.BorderSizePixel = 0
     container.Parent = self._screenGui
 
     local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0, 8)
+    corner.CornerRadius = UDim.new(0, cornerRadius or 8)
     corner.Parent = container
+
+    return container
+end
+
+function UIController:_createTimerDisplay()
+    local container = self:_createHUDContainer("TimerContainer", UDim2.new(0, 160, 0, 50), UDim2.new(0.5, -80, 0, 10))
 
     self._timerLabel = Instance.new("TextLabel")
     self._timerLabel.Name = "TimerLabel"
@@ -112,18 +119,7 @@ function UIController:_createRoleBanner()
 end
 
 function UIController:_createRunnersCounter()
-    local container = Instance.new("Frame")
-    container.Name = "RunnersContainer"
-    container.Size = UDim2.new(0, 160, 0, 36)
-    container.Position = UDim2.new(1, -170, 0, 10)
-    container.BackgroundColor3 = GameConfig.StateBackgrounds.Dark
-    container.BackgroundTransparency = 0.3
-    container.BorderSizePixel = 0
-    container.Parent = self._screenGui
-
-    local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0, 8)
-    corner.Parent = container
+    local container = self:_createHUDContainer("RunnersContainer", UDim2.new(0, 160, 0, 36), UDim2.new(1, -170, 0, 10))
 
     self._runnersLabel = Instance.new("TextLabel")
     self._runnersLabel.Name = "RunnersLabel"
@@ -139,18 +135,7 @@ function UIController:_createRunnersCounter()
 end
 
 function UIController:_createCoinsDisplay()
-    local container = Instance.new("Frame")
-    container.Name = "CoinsContainer"
-    container.Size = UDim2.new(0, 140, 0, 36)
-    container.Position = UDim2.new(0, 10, 0, 10)
-    container.BackgroundColor3 = GameConfig.StateBackgrounds.Dark
-    container.BackgroundTransparency = 0.3
-    container.BorderSizePixel = 0
-    container.Parent = self._screenGui
-
-    local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0, 8)
-    corner.Parent = container
+    local container = self:_createHUDContainer("CoinsContainer", UDim2.new(0, 140, 0, 36), UDim2.new(0, 10, 0, 10))
 
     self._coinsLabel = Instance.new("TextLabel")
     self._coinsLabel.Name = "CoinsLabel"
@@ -211,19 +196,8 @@ function UIController:_createCountdownDisplay()
 end
 
 function UIController:_createStatusDisplay()
-    self._statusFrame = Instance.new("Frame")
-    self._statusFrame.Name = "StatusDisplay"
-    self._statusFrame.Size = UDim2.new(0, 420, 0, 140)
-    self._statusFrame.Position = UDim2.new(0.5, -210, 0.3, 0)
-    self._statusFrame.BackgroundColor3 = GameConfig.StateBackgrounds.Dark
-    self._statusFrame.BackgroundTransparency = 0.25
-    self._statusFrame.BorderSizePixel = 0
+    self._statusFrame = self:_createHUDContainer("StatusDisplay", UDim2.new(0, 420, 0, 140), UDim2.new(0.5, -210, 0.3, 0), 12, 0.25)
     self._statusFrame.Visible = false
-    self._statusFrame.Parent = self._screenGui
-
-    local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0, 12)
-    corner.Parent = self._statusFrame
 
     self._statusTitle = Instance.new("TextLabel")
     self._statusTitle.Name = "StatusTitle"
@@ -497,10 +471,6 @@ function UIController:ShowResults(results, taggerWon)
     end
 
     self:NotifyTag(resultText)
-end
-
-function UIController:GetScreenGui()
-    return self._screenGui
 end
 
 return UIController

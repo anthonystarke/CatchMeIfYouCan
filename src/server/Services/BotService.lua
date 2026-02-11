@@ -262,8 +262,10 @@ function BotService:GetActiveBots()
     return self._bots
 end
 
+-- Safe bot check: Roblox Player instances throw on invalid property access,
+-- so we check the type first. Bots are plain Lua tables, players are Instances.
 function BotService:IsBot(participant)
-    return participant.IsBot == true
+    return typeof(participant) == "table" and participant.IsBot == true
 end
 
 -- Character Creation
@@ -432,39 +434,23 @@ function BotService:_setupAnimations(bot)
 
     -- Create and load animation tracks
     local tracks = {}
-    local success, err
+    local animDefs = {
+        { name = "idle", id = self._animationIds.idle, priority = Enum.AnimationPriority.Idle },
+        { name = "walk", id = self._animationIds.walk, priority = Enum.AnimationPriority.Movement },
+        { name = "run",  id = self._animationIds.run,  priority = Enum.AnimationPriority.Movement },
+    }
 
-    local idleAnim = Instance.new("Animation")
-    idleAnim.AnimationId = self._animationIds.idle
-    success, err = pcall(function()
-        tracks.idle = animator:LoadAnimation(idleAnim)
-        tracks.idle.Looped = true
-        tracks.idle.Priority = Enum.AnimationPriority.Idle
-    end)
-    if not success then
-        warn("[BotService] Failed to load idle animation:", err)
-    end
-
-    local walkAnim = Instance.new("Animation")
-    walkAnim.AnimationId = self._animationIds.walk
-    success, err = pcall(function()
-        tracks.walk = animator:LoadAnimation(walkAnim)
-        tracks.walk.Looped = true
-        tracks.walk.Priority = Enum.AnimationPriority.Movement
-    end)
-    if not success then
-        warn("[BotService] Failed to load walk animation:", err)
-    end
-
-    local runAnim = Instance.new("Animation")
-    runAnim.AnimationId = self._animationIds.run
-    success, err = pcall(function()
-        tracks.run = animator:LoadAnimation(runAnim)
-        tracks.run.Looped = true
-        tracks.run.Priority = Enum.AnimationPriority.Movement
-    end)
-    if not success then
-        warn("[BotService] Failed to load run animation:", err)
+    for _, def in ipairs(animDefs) do
+        local anim = Instance.new("Animation")
+        anim.AnimationId = def.id
+        local success, err = pcall(function()
+            tracks[def.name] = animator:LoadAnimation(anim)
+            tracks[def.name].Looped = true
+            tracks[def.name].Priority = def.priority
+        end)
+        if not success then
+            warn("[BotService] Failed to load", def.name, "animation:", err)
+        end
     end
 
     tracks.current = nil
@@ -567,9 +553,23 @@ function BotService:_moveBotPivot(bot, targetPos)
     bot.Character:PivotTo(CFrame.new(newPos, newPos + moveDir))
 end
 
--- Direct movement: move straight toward target position
-function BotService:_navigateTo(bot, targetPos)
-    self:_moveBot(bot, targetPos)
+-- Clamp a position to the bot play area bounds
+function BotService:_clampToMapBounds(pos)
+    return Vector3.new(
+        math.clamp(pos.X, -Constants.BOT_MAP_BOUNDS, Constants.BOT_MAP_BOUNDS),
+        pos.Y,
+        math.clamp(pos.Z, -Constants.BOT_MAP_BOUNDS, Constants.BOT_MAP_BOUNDS)
+    )
+end
+
+-- Generate a random wander target within bounds
+function BotService:_generateWanderTarget(currentPos, range)
+    local target = currentPos + Vector3.new(
+        (math.random() - 0.5) * range,
+        0,
+        (math.random() - 0.5) * range
+    )
+    return self:_clampToMapBounds(target)
 end
 
 -- AI Control
@@ -687,12 +687,7 @@ function BotService:_checkAndRecoverStuck(bot, state, botRoot)
         0,
         (math.random() - 0.5) * nudgeScale
     )
-    local nudgedPos = currentPos + jitter
-    nudgedPos = Vector3.new(
-        math.clamp(nudgedPos.X, -Constants.BOT_MAP_BOUNDS, Constants.BOT_MAP_BOUNDS),
-        currentPos.Y,
-        math.clamp(nudgedPos.Z, -Constants.BOT_MAP_BOUNDS, Constants.BOT_MAP_BOUNDS)
-    )
+    local nudgedPos = self:_clampToMapBounds(currentPos + jitter)
 
     if bot.IsMinimalRig then
         bot.Character:PivotTo(CFrame.new(nudgedPos))
@@ -786,7 +781,7 @@ function BotService:_taggerAI(bot, roundState)
             )
 
             self:_playBotAnimation(bot, "run")
-            self:_navigateTo(bot, targetPos + offset)
+            self:_moveBot(bot, targetPos + offset)
 
             -- Tag check
             local dist = (state.committed_target.Position - botRoot.Position).Magnitude
@@ -798,20 +793,11 @@ function BotService:_taggerAI(bot, roundState)
             self:_playBotAnimation(bot, "walk")
 
             if not state.wander_target or (now - state.wander_started) > stats.wander_persist_secs then
-                state.wander_target = botRoot.Position + Vector3.new(
-                    (math.random() - 0.5) * 30,
-                    0,
-                    (math.random() - 0.5) * 30
-                )
-                state.wander_target = Vector3.new(
-                    math.clamp(state.wander_target.X, -Constants.BOT_MAP_BOUNDS, Constants.BOT_MAP_BOUNDS),
-                    state.wander_target.Y,
-                    math.clamp(state.wander_target.Z, -Constants.BOT_MAP_BOUNDS, Constants.BOT_MAP_BOUNDS)
-                )
+                state.wander_target = self:_generateWanderTarget(botRoot.Position, 30)
                 state.wander_started = now
             end
 
-            self:_navigateTo(bot, state.wander_target)
+            self:_moveBot(bot, state.wander_target)
         end
 
         task.wait(Constants.BOT_UPDATE_INTERVAL)
@@ -899,33 +885,19 @@ function BotService:_runnerAI(bot, roundState)
                 0,
                 (math.random() - 0.5) * Constants.BOT_RANDOM_OFFSET
             )
-            local fleeTarget = botRoot.Position + fleeDir * 20 + randomOffset
-            fleeTarget = Vector3.new(
-                math.clamp(fleeTarget.X, -Constants.BOT_MAP_BOUNDS, Constants.BOT_MAP_BOUNDS),
-                fleeTarget.Y,
-                math.clamp(fleeTarget.Z, -Constants.BOT_MAP_BOUNDS, Constants.BOT_MAP_BOUNDS)
-            )
+            local fleeTarget = self:_clampToMapBounds(botRoot.Position + fleeDir * 20 + randomOffset)
 
-            self:_navigateTo(bot, fleeTarget)
+            self:_moveBot(bot, fleeTarget)
         else
             -- Wander with persistence
             self:_playBotAnimation(bot, "walk")
 
             if not state.wander_target or (now - state.wander_started) > stats.wander_persist_secs then
-                state.wander_target = botRoot.Position + Vector3.new(
-                    (math.random() - 0.5) * 20,
-                    0,
-                    (math.random() - 0.5) * 20
-                )
-                state.wander_target = Vector3.new(
-                    math.clamp(state.wander_target.X, -Constants.BOT_MAP_BOUNDS, Constants.BOT_MAP_BOUNDS),
-                    state.wander_target.Y,
-                    math.clamp(state.wander_target.Z, -Constants.BOT_MAP_BOUNDS, Constants.BOT_MAP_BOUNDS)
-                )
+                state.wander_target = self:_generateWanderTarget(botRoot.Position, 20)
                 state.wander_started = now
             end
 
-            self:_navigateTo(bot, state.wander_target)
+            self:_moveBot(bot, state.wander_target)
         end
 
         task.wait(Constants.BOT_UPDATE_INTERVAL)

@@ -68,10 +68,8 @@ function RoundService:Start()
     end)
 end
 
--- Safe bot check: Roblox Player instances throw on invalid property access,
--- so we check the type first. Bots are plain Lua tables, players are Instances.
 local function isBot(participant)
-    return typeof(participant) == "table" and participant.IsBot == true
+    return BotService:IsBot(participant)
 end
 
 function RoundService:GetRoundState()

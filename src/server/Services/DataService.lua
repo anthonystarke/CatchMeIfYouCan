@@ -82,13 +82,8 @@ function DataService:Init()
         warn("[DataService] Failed to get DataStore:", dataStore)
     end
 
-    -- Create currency update event
+    -- Create currency update event (Remotes folder created by init.server.lua)
     local remotes = ReplicatedStorage:FindFirstChild("Remotes")
-    if not remotes then
-        remotes = Instance.new("Folder")
-        remotes.Name = "Remotes"
-        remotes.Parent = ReplicatedStorage
-    end
 
     self._currencyUpdateEvent = Instance.new("RemoteEvent")
     self._currencyUpdateEvent.Name = "CurrencyUpdate"
@@ -289,27 +284,21 @@ function DataService:AddCoins(player, amount)
     return false
 end
 
-function DataService:RemoveCoins(player, amount)
-    local data = self:GetData(player)
-    if data and data.Coins >= amount then
-        data.Coins = data.Coins - amount
-        self:_notifyCurrencyChange(player, data)
-        return true
-    end
-    return false
-end
-
-function DataService:TryDeductCoins(player, amount)
+function DataService:_tryDeduct(player, field, amount)
     local data = self:GetData(player)
     if not data then
         return false, "Data not loaded"
     end
-    if data.Coins < amount then
-        return false, "Not enough coins"
+    if data[field] < amount then
+        return false, "Not enough " .. field:lower()
     end
-    data.Coins = data.Coins - amount
+    data[field] = data[field] - amount
     self:_notifyCurrencyChange(player, data)
     return true, nil
+end
+
+function DataService:TryDeductCoins(player, amount)
+    return self:_tryDeduct(player, "Coins", amount)
 end
 
 function DataService:AddGems(player, amount)
@@ -323,16 +312,7 @@ function DataService:AddGems(player, amount)
 end
 
 function DataService:TryDeductGems(player, amount)
-    local data = self:GetData(player)
-    if not data then
-        return false, "Data not loaded"
-    end
-    if data.Gems < amount then
-        return false, "Not enough gems"
-    end
-    data.Gems = data.Gems - amount
-    self:_notifyCurrencyChange(player, data)
-    return true, nil
+    return self:_tryDeduct(player, "Gems", amount)
 end
 
 function DataService:_notifyCurrencyChange(player, data)

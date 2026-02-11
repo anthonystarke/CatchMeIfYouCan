@@ -217,43 +217,30 @@ function MapService:_buildMap(definition)
     }
 end
 
-function MapService:TeleportPlayerToSpawn(player, role)
-    if not player or not player.Character then
-        return false
-    end
-
+-- Find spawn markers matching a name pattern
+function MapService:_getSpawnsByPattern(pattern)
     local map = self:GetOrCreateMap()
     if not map then
+        return {}
+    end
+
+    local spawns = {}
+    for _, child in ipairs(map.SpawnsFolder:GetChildren()) do
+        if child.Name:match(pattern) then
+            table.insert(spawns, child)
+        end
+    end
+    return spawns
+end
+
+-- Teleport a player to a random spawn from a list, or a single named spawn
+function MapService:_teleportToSpawn(player, spawns)
+    if not player or not player.Character or #spawns == 0 then
         return false
     end
 
-    local spawnsFolder = map.SpawnsFolder
-    local targetPos = nil
-
-    if role == Constants.ROLES.TAGGER then
-        -- Pick a random tagger spawn from the circle
-        local taggerSpawns = {}
-        for _, child in ipairs(spawnsFolder:GetChildren()) do
-            if child.Name:match("^TaggerSpawn_") then
-                table.insert(taggerSpawns, child)
-            end
-        end
-
-        if #taggerSpawns > 0 then
-            local randomSpawn = taggerSpawns[math.random(#taggerSpawns)]
-            targetPos = randomSpawn.Position + Vector3.new(0, 3, 0)
-        end
-    else
-        -- Runner spawns at center
-        local runnerSpawn = spawnsFolder:FindFirstChild("RunnerSpawn")
-        if runnerSpawn then
-            targetPos = runnerSpawn.Position + Vector3.new(0, 3, 0)
-        end
-    end
-
-    if not targetPos then
-        return false
-    end
+    local spawn = spawns[math.random(#spawns)]
+    local targetPos = spawn.Position + Vector3.new(0, 3, 0)
 
     local humanoidRootPart = player.Character:FindFirstChild("HumanoidRootPart")
     if humanoidRootPart then
@@ -264,38 +251,20 @@ function MapService:TeleportPlayerToSpawn(player, role)
     return false
 end
 
-function MapService:TeleportToLobby(player)
-    if not player or not player.Character then
-        return false
-    end
-
-    local map = self:GetOrCreateMap()
-    if not map then
-        return false
-    end
-
-    local spawnsFolder = map.SpawnsFolder
-    local lobbySpawns = {}
-    for _, child in ipairs(spawnsFolder:GetChildren()) do
-        if child.Name:match("^LobbySpawn_") then
-            table.insert(lobbySpawns, child)
+function MapService:TeleportPlayerToSpawn(player, role)
+    if role == Constants.ROLES.TAGGER then
+        return self:_teleportToSpawn(player, self:_getSpawnsByPattern("^TaggerSpawn_"))
+    else
+        local runnerSpawn = self:GetOrCreateMap() and self:GetOrCreateMap().SpawnsFolder:FindFirstChild("RunnerSpawn")
+        if runnerSpawn then
+            return self:_teleportToSpawn(player, { runnerSpawn })
         end
-    end
-
-    if #lobbySpawns == 0 then
         return false
     end
+end
 
-    local randomSpawn = lobbySpawns[math.random(#lobbySpawns)]
-    local targetPos = randomSpawn.Position + Vector3.new(0, 3, 0)
-
-    local humanoidRootPart = player.Character:FindFirstChild("HumanoidRootPart")
-    if humanoidRootPart then
-        humanoidRootPart.CFrame = CFrame.new(targetPos)
-        return true
-    end
-
-    return false
+function MapService:TeleportToLobby(player)
+    return self:_teleportToSpawn(player, self:_getSpawnsByPattern("^LobbySpawn_"))
 end
 
 function MapService:CleanupRound()
