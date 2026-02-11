@@ -62,6 +62,7 @@ Constants.BOT_FILL_TARGET = 4 -- Auto-fill games to this many total participants
 Constants.BOT_UPDATE_INTERVAL = 0.3 -- AI decision frequency (seconds)
 Constants.BOT_FLEE_DISTANCE = 40 -- How far runner bots flee from tagger
 Constants.BOT_RANDOM_OFFSET = 15 -- Random movement variation for organic feel
+Constants.BOT_MAP_BOUNDS = 35 -- Effective play area for bot AI (±studs from center)
 Constants.BOT_NAMES = { "Bolt", "Dash", "Flash", "Blitz", "Zippy", "Turbo", "Rocket", "Swift", "Storm", "Spark" }
 
 -- Bot reaction delays (seconds before acting on new information)

@@ -754,9 +754,9 @@ function BotService:_taggerAI(bot, roundState)
                     (math.random() - 0.5) * 30
                 )
                 state.wander_target = Vector3.new(
-                    math.clamp(state.wander_target.X, -55, 55),
+                    math.clamp(state.wander_target.X, -Constants.BOT_MAP_BOUNDS, Constants.BOT_MAP_BOUNDS),
                     state.wander_target.Y,
-                    math.clamp(state.wander_target.Z, -55, 55)
+                    math.clamp(state.wander_target.Z, -Constants.BOT_MAP_BOUNDS, Constants.BOT_MAP_BOUNDS)
                 )
                 state.wander_started = now
             end
@@ -841,9 +841,9 @@ function BotService:_runnerAI(bot, roundState)
             )
             local fleeTarget = botRoot.Position + fleeDirection * 20 + randomOffset
             fleeTarget = Vector3.new(
-                math.clamp(fleeTarget.X, -55, 55),
+                math.clamp(fleeTarget.X, -Constants.BOT_MAP_BOUNDS, Constants.BOT_MAP_BOUNDS),
                 fleeTarget.Y,
-                math.clamp(fleeTarget.Z, -55, 55)
+                math.clamp(fleeTarget.Z, -Constants.BOT_MAP_BOUNDS, Constants.BOT_MAP_BOUNDS)
             )
             self:_navigateTo(bot, fleeTarget)
         else
@@ -857,9 +857,9 @@ function BotService:_runnerAI(bot, roundState)
                     (math.random() - 0.5) * 20
                 )
                 state.wander_target = Vector3.new(
-                    math.clamp(state.wander_target.X, -55, 55),
+                    math.clamp(state.wander_target.X, -Constants.BOT_MAP_BOUNDS, Constants.BOT_MAP_BOUNDS),
                     state.wander_target.Y,
-                    math.clamp(state.wander_target.Z, -55, 55)
+                    math.clamp(state.wander_target.Z, -Constants.BOT_MAP_BOUNDS, Constants.BOT_MAP_BOUNDS)
                 )
                 state.wander_started = now
             end

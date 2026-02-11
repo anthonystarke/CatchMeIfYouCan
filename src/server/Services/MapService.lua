@@ -21,12 +21,12 @@ local MAP_DEFINITIONS = {
         mapId = "playground_panic",
         size = 120,
         runnerSpawns = {
-            Vector3.new(-40, 5, -40),
-            Vector3.new(40, 5, -40),
-            Vector3.new(-40, 5, 40),
-            Vector3.new(40, 5, 40),
-            Vector3.new(-50, 5, 0),
-            Vector3.new(50, 5, 0),
+            Vector3.new(-15, 5, -15),
+            Vector3.new(15, 5, -15),
+            Vector3.new(-15, 5, 15),
+            Vector3.new(15, 5, 15),
+            Vector3.new(-20, 5, 0),
+            Vector3.new(20, 5, 0),
         },
         taggerSpawn = Vector3.new(0, 5, 0),
         obstacles = {
