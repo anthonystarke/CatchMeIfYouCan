@@ -64,6 +64,16 @@ Constants.BOT_FLEE_DISTANCE = 40 -- How far runner bots flee from tagger
 Constants.BOT_RANDOM_OFFSET = 15 -- Random movement variation for organic feel
 Constants.BOT_NAMES = { "Bolt", "Dash", "Flash", "Blitz", "Zippy", "Turbo", "Rocket", "Swift", "Storm", "Spark" }
 
+-- Bot animation fallback IDs (used when ServerStorage animations can't be loaded)
+-- R15 defaults
+Constants.BOT_ANIM_IDLE_R15 = "rbxassetid://507766666"
+Constants.BOT_ANIM_WALK_R15 = "rbxassetid://507777826"
+Constants.BOT_ANIM_RUN_R15 = "rbxassetid://507767714"
+-- R6 defaults
+Constants.BOT_ANIM_IDLE_R6 = "rbxassetid://180435571"
+Constants.BOT_ANIM_WALK_R6 = "rbxassetid://180426354"
+Constants.BOT_ANIM_RUN_R6 = "rbxassetid://180426354"
+
 -- Powerups
 Constants.POWERUP_SPAWN_INTERVAL = 15
 Constants.POWERUP_DURATION = 8

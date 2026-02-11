@@ -2,11 +2,13 @@
     BotService
     Manages AI bots: spawning, character creation, movement AI, auto-fill logic
     Bots act as participants in rounds alongside real players.
+    Uses a Creator Store NPC model with idle/walk/run animations.
 ]]
 
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ServerStorage = game:GetService("ServerStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Constants = require(Shared:WaitForChild("Config"):WaitForChild("Constants"))
@@ -20,11 +22,19 @@ BotService._aiThreads = {} -- {[botUserId]: thread}
 BotService._usedNames = {} -- Track which names are in use
 BotService._roundService = nil -- Set during Start
 
+-- Asset caching
+BotService._modelTemplate = nil -- Cached NPC model to clone
+BotService._isR15 = false -- Whether the template is R15
+BotService._animationIds = { idle = nil, walk = nil, run = nil }
+BotService._botAnimTracks = {} -- {[botUserId]: {idle, walk, run, current}}
+
 -- Bot ground height for minimal rig PivotTo movement
 local BOT_GROUND_Y = 3
 
 function BotService:Init()
     print("[BotService] Initializing...")
+    self:_loadModelTemplate()
+    self:_loadAnimations()
 end
 
 function BotService:Start()
@@ -50,6 +60,83 @@ function BotService:SetRoundService(roundService)
     self._roundService = roundService
 end
 
+-- Asset Loading
+
+function BotService:_loadModelTemplate()
+    local model = ServerStorage:FindFirstChild("Mr Brookhaven")
+    if not model then
+        warn("[BotService] No 'Mr Brookhaven' found in ServerStorage, will fall back to R6 rig")
+        return
+    end
+
+    if not model:IsA("Model") then
+        warn("[BotService] 'Mr Brookhaven' is not a Model, it's a", model.ClassName)
+        return
+    end
+
+    self._modelTemplate = model
+
+    -- Detect actual rig type from Humanoid
+    local humanoid = model:FindFirstChildWhichIsA("Humanoid")
+    if humanoid then
+        self._isR15 = (humanoid.RigType == Enum.HumanoidRigType.R15)
+        print("[BotService] Template rig type:", humanoid.RigType.Name)
+    end
+
+    local partCount, motorCount = 0, 0
+    for _, desc in ipairs(model:GetDescendants()) do
+        if desc:IsA("BasePart") then
+            partCount = partCount + 1
+        elseif desc:IsA("Motor6D") then
+            motorCount = motorCount + 1
+        end
+    end
+    print("[BotService] Loaded template - parts:", partCount, "Motor6D joints:", motorCount)
+end
+
+function BotService:_loadAnimations()
+    local animName = self._isR15 and "R15 Animation" or "R6 Animation"
+    local animAsset = ServerStorage:FindFirstChild(animName)
+
+    if animAsset then
+        -- Log contents so we can see what's inside
+        print("[BotService] Inspecting", animName, "contents:")
+        for _, desc in ipairs(animAsset:GetDescendants()) do
+            print("  -", desc.Name, "(" .. desc.ClassName .. ")",
+                desc:IsA("Animation") and ("AnimationId: " .. desc.AnimationId) or "")
+        end
+
+        -- Search all descendants for Animation instances
+        for _, desc in ipairs(animAsset:GetDescendants()) do
+            if desc:IsA("Animation") then
+                local name = desc.Name:lower()
+                if name:find("idle") and not self._animationIds.idle then
+                    self._animationIds.idle = desc.AnimationId
+                elseif name:find("run") and not self._animationIds.run then
+                    self._animationIds.run = desc.AnimationId
+                elseif name:find("walk") and not self._animationIds.walk then
+                    self._animationIds.walk = desc.AnimationId
+                end
+            end
+        end
+    else
+        warn("[BotService] No '" .. animName .. "' found in ServerStorage, using defaults")
+    end
+
+    -- Apply rig-type-aware fallback defaults for any missing animations
+    if not self._animationIds.idle then
+        self._animationIds.idle = self._isR15 and Constants.BOT_ANIM_IDLE_R15 or Constants.BOT_ANIM_IDLE_R6
+    end
+    if not self._animationIds.walk then
+        self._animationIds.walk = self._isR15 and Constants.BOT_ANIM_WALK_R15 or Constants.BOT_ANIM_WALK_R6
+    end
+    if not self._animationIds.run then
+        self._animationIds.run = self._isR15 and Constants.BOT_ANIM_RUN_R15 or Constants.BOT_ANIM_RUN_R6
+    end
+
+    print("[BotService] Animation IDs - idle:", self._animationIds.idle, "walk:", self._animationIds.walk, "run:", self._animationIds.run)
+end
+
 -- Auto-fill logic: maintain BOT_FILL_TARGET total participants
 function BotService:_onPlayerCountChanged()
     local realPlayerCount = #Players:GetPlayers()
@@ -58,16 +145,13 @@ function BotService:_onPlayerCountChanged()
     local target = Constants.BOT_FILL_TARGET
 
     if totalParticipants < target then
-        -- Need more bots
         local botsNeeded = target - totalParticipants
         for _ = 1, botsNeeded do
             self:SpawnBot()
         end
     elseif realPlayerCount >= target and currentBotCount > 0 then
-        -- Enough real players, remove all bots
         self:RemoveAllBots()
     elseif totalParticipants > target and currentBotCount > 0 then
-        -- Too many participants, remove excess bots
         local excess = totalParticipants - target
         local toRemove = math.min(excess, currentBotCount)
         for _ = 1, toRemove do
@@ -82,7 +166,6 @@ function BotService:SpawnBot()
 
     local botName = self:_pickBotName()
 
-    -- Create the character model
     local character, isMinimalRig = self:_createCharacter(botName)
     if not character then
         warn("[BotService] Failed to create character for", botName)
@@ -98,6 +181,12 @@ function BotService:SpawnBot()
     }
 
     table.insert(self._bots, bot)
+
+    -- Set up animations (only for proper rigs, not minimal)
+    if not isMinimalRig then
+        self:_setupAnimations(bot)
+    end
+
     print("[BotService] Spawned bot:", botName, "(ID:", botId, ") minimal:", isMinimalRig)
     return bot
 end
@@ -105,22 +194,20 @@ end
 function BotService:RemoveBot(specificBot)
     local bot = specificBot
     if not bot and #self._bots > 0 then
-        bot = self._bots[#self._bots] -- Remove last bot
+        bot = self._bots[#self._bots]
     end
 
     if not bot then
         return
     end
 
-    -- Stop AI thread
     self:StopAI(bot)
+    self:_cleanupAnimations(bot)
 
-    -- Destroy character
     if bot.Character then
         bot.Character:Destroy()
     end
 
-    -- Remove from list
     for i, b in ipairs(self._bots) do
         if b.UserId == bot.UserId then
             table.remove(self._bots, i)
@@ -128,9 +215,7 @@ function BotService:RemoveBot(specificBot)
         end
     end
 
-    -- Free the name
     self._usedNames[bot.Name] = nil
-
     print("[BotService] Removed bot:", bot.Name)
 end
 
@@ -151,8 +236,15 @@ end
 -- Character Creation
 
 function BotService:_createCharacter(name)
-    -- Try creating a proper R6 rig via CreateHumanoidModelFromDescription
-    -- This produces a full character with Motor6D joints that supports Humanoid:MoveTo()
+    -- Try cloning the loaded NPC model template (proper R15 rig)
+    if self._modelTemplate then
+        local character = self:_createFromTemplate(name)
+        if character then
+            return character, false
+        end
+    end
+
+    -- Fallback: create a proper R6 rig via CreateHumanoidModelFromDescription
     local success, model = pcall(function()
         local description = Instance.new("HumanoidDescription")
         return Players:CreateHumanoidModelFromDescription(description, Enum.HumanoidRigType.R6)
@@ -168,21 +260,71 @@ function BotService:_createCharacter(name)
             humanoid.DisplayName = name
         end
 
-        print("[BotService] Created R6 rig for", name)
-        return model, false -- not a minimal rig
+        print("[BotService] Created R6 fallback rig for", name)
+        return model, false
     end
 
-    -- Fallback: create a minimal anchored rig (uses PivotTo for movement)
-    warn("[BotService] CreateHumanoidModelFromDescription failed, creating minimal rig for", name)
+    -- Last resort: minimal anchored rig
+    warn("[BotService] All rig creation failed, creating minimal rig for", name)
     local minimal = self:_createMinimalCharacter(name)
-    return minimal, true -- is a minimal rig
+    return minimal, true
+end
+
+function BotService:_createFromTemplate(name)
+    local cloneSuccess, model = pcall(function()
+        return self._modelTemplate:Clone()
+    end)
+    if not cloneSuccess or not model then
+        warn("[BotService] Failed to clone template:", model)
+        return nil
+    end
+
+    model.Name = name
+
+    -- Unanchor all parts so Humanoid:MoveTo() works (Motor6D joints hold them together)
+    for _, part in ipairs(model:GetDescendants()) do
+        if part:IsA("BasePart") then
+            part.Anchored = false
+        end
+    end
+
+    local humanoid = model:FindFirstChildWhichIsA("Humanoid")
+    if not humanoid then
+        humanoid = Instance.new("Humanoid")
+        humanoid.Parent = model
+    end
+    humanoid.WalkSpeed = Constants.DEFAULT_WALK_SPEED
+    humanoid.DisplayName = name
+
+    -- Ensure PrimaryPart is set
+    if not model.PrimaryPart then
+        local rootPart = model:FindFirstChild("HumanoidRootPart")
+        if rootPart then
+            model.PrimaryPart = rootPart
+        else
+            warn("[BotService] No HumanoidRootPart found in cloned model!")
+        end
+    end
+
+    model.Parent = Workspace
+
+    -- Move bot above ground — template position is from ServerStorage and likely underground
+    if model.PrimaryPart then
+        model:PivotTo(CFrame.new(
+            math.random(-20, 20),
+            5,
+            math.random(-20, 20)
+        ))
+    end
+
+    print("[BotService] Created character from template for", name)
+    return model
 end
 
 function BotService:_createMinimalCharacter(name)
     local model = Instance.new("Model")
     model.Name = name
 
-    -- All parts anchored — movement handled via Model:PivotTo()
     local rootPart = Instance.new("Part")
     rootPart.Name = "HumanoidRootPart"
     rootPart.Size = Vector3.new(2, 2, 1)
@@ -216,7 +358,6 @@ function BotService:_createMinimalCharacter(name)
     humanoid.DisplayName = name
     humanoid.Parent = model
 
-    -- Nametag
     local nameLabel = Instance.new("BillboardGui")
     nameLabel.Name = "BotNametag"
     nameLabel.Size = UDim2.new(0, 100, 0, 30)
@@ -240,6 +381,103 @@ function BotService:_createMinimalCharacter(name)
     return model
 end
 
+-- Animation Management
+
+function BotService:_setupAnimations(bot)
+    local humanoid = bot.Character and bot.Character:FindFirstChildWhichIsA("Humanoid")
+    if not humanoid then
+        warn("[BotService] No humanoid for animation setup on", bot.Name)
+        return
+    end
+
+    -- Get or create Animator
+    local animator = humanoid:FindFirstChildWhichIsA("Animator")
+    if not animator then
+        animator = Instance.new("Animator")
+        animator.Parent = humanoid
+    end
+
+    -- Create and load animation tracks
+    local tracks = {}
+    local success, err
+
+    local idleAnim = Instance.new("Animation")
+    idleAnim.AnimationId = self._animationIds.idle
+    success, err = pcall(function()
+        tracks.idle = animator:LoadAnimation(idleAnim)
+        tracks.idle.Looped = true
+        tracks.idle.Priority = Enum.AnimationPriority.Idle
+    end)
+    if not success then
+        warn("[BotService] Failed to load idle animation:", err)
+    end
+
+    local walkAnim = Instance.new("Animation")
+    walkAnim.AnimationId = self._animationIds.walk
+    success, err = pcall(function()
+        tracks.walk = animator:LoadAnimation(walkAnim)
+        tracks.walk.Looped = true
+        tracks.walk.Priority = Enum.AnimationPriority.Movement
+    end)
+    if not success then
+        warn("[BotService] Failed to load walk animation:", err)
+    end
+
+    local runAnim = Instance.new("Animation")
+    runAnim.AnimationId = self._animationIds.run
+    success, err = pcall(function()
+        tracks.run = animator:LoadAnimation(runAnim)
+        tracks.run.Looped = true
+        tracks.run.Priority = Enum.AnimationPriority.Movement
+    end)
+    if not success then
+        warn("[BotService] Failed to load run animation:", err)
+    end
+
+    tracks.current = nil
+    self._botAnimTracks[bot.UserId] = tracks
+
+    -- No Humanoid.Running listener — animations are driven directly from the AI loop
+    -- Start with idle
+    self:_playBotAnimation(bot, "idle")
+    print("[BotService] Animation setup complete for", bot.Name)
+end
+
+function BotService:_playBotAnimation(bot, animName)
+    local tracks = self._botAnimTracks[bot.UserId]
+    if not tracks then
+        return
+    end
+
+    -- Skip if already playing this animation
+    if tracks.current == animName then
+        return
+    end
+
+    -- Stop current animation with short fade
+    if tracks.current and tracks[tracks.current] then
+        tracks[tracks.current]:Stop(0.2)
+    end
+
+    -- Play new animation with short fade
+    if tracks[animName] then
+        tracks[animName]:Play(0.2)
+    end
+    tracks.current = animName
+end
+
+function BotService:_cleanupAnimations(bot)
+    local tracks = self._botAnimTracks[bot.UserId]
+    if tracks then
+        for key, track in pairs(tracks) do
+            if key ~= "current" then
+                pcall(function() track:Stop() end)
+            end
+        end
+        self._botAnimTracks[bot.UserId] = nil
+    end
+end
+
 function BotService:_pickBotName()
     for _, name in ipairs(Constants.BOT_NAMES) do
         if not self._usedNames[name] then
@@ -247,7 +485,6 @@ function BotService:_pickBotName()
             return name
         end
     end
-    -- Fallback if all names taken
     local name = "Bot_" .. math.abs(self._nextBotId)
     self._usedNames[name] = true
     return name
@@ -255,7 +492,6 @@ end
 
 -- Movement
 
--- Move a bot toward a target position using the appropriate method
 function BotService:_moveBot(bot, targetPos)
     if bot.IsMinimalRig then
         self:_moveBotPivot(bot, targetPos)
@@ -264,7 +500,6 @@ function BotService:_moveBot(bot, targetPos)
     end
 end
 
--- Standard movement via Humanoid:MoveTo() (for proper R6/R15 rigs)
 function BotService:_moveBotHumanoid(bot, targetPos)
     local humanoid = bot.Character and bot.Character:FindFirstChild("Humanoid")
     if humanoid then
@@ -272,7 +507,6 @@ function BotService:_moveBotHumanoid(bot, targetPos)
     end
 end
 
--- Fallback movement via Model:PivotTo() (for anchored minimal rigs)
 function BotService:_moveBotPivot(bot, targetPos)
     if not bot.Character or not bot.Character.PrimaryPart then
         return
@@ -325,12 +559,18 @@ function BotService:StopAI(bot)
         task.cancel(self._aiThreads[bot.UserId])
         self._aiThreads[bot.UserId] = nil
     end
+
+    self:_playBotAnimation(bot, "idle")
 end
 
 function BotService:StopAllAI()
     for botId, thread in pairs(self._aiThreads) do
         task.cancel(thread)
         self._aiThreads[botId] = nil
+    end
+
+    for _, bot in ipairs(self._bots) do
+        self:_playBotAnimation(bot, "idle")
     end
 end
 
@@ -382,6 +622,7 @@ function BotService:_taggerAI(bot, roundState)
                 0,
                 (math.random() - 0.5) * 4
             )
+            self:_playBotAnimation(bot, "run")
             self:_moveBot(bot, targetPos + offset)
 
             -- Check if close enough to tag
@@ -390,6 +631,7 @@ function BotService:_taggerAI(bot, roundState)
             end
         else
             -- No target, wander randomly
+            self:_playBotAnimation(bot, "walk")
             local wanderPos = botRoot.Position + Vector3.new(
                 (math.random() - 0.5) * 30,
                 0,
@@ -421,8 +663,9 @@ function BotService:_runnerAI(bot, roundState)
             break
         end
 
-        -- Check if this bot has been tagged
+        -- Check if this bot has been tagged — stop moving, play idle
         if roundState and roundState.TaggedPlayers[bot.UserId] then
+            self:_playBotAnimation(bot, "idle")
             task.wait(Constants.BOT_UPDATE_INTERVAL)
             continue
         end
@@ -448,7 +691,8 @@ function BotService:_runnerAI(bot, roundState)
         end
 
         if nearestTagger and nearestDist < Constants.BOT_FLEE_DISTANCE then
-            -- Flee from tagger (move in opposite direction)
+            -- Flee from tagger — run animation
+            self:_playBotAnimation(bot, "run")
             local fleeDirection = (botRoot.Position - nearestTagger.Position).Unit
             local randomOffset = Vector3.new(
                 (math.random() - 0.5) * Constants.BOT_RANDOM_OFFSET,
@@ -463,7 +707,8 @@ function BotService:_runnerAI(bot, roundState)
             )
             self:_moveBot(bot, fleeTarget)
         else
-            -- No nearby threat, wander randomly
+            -- No nearby threat, wander — walk animation
+            self:_playBotAnimation(bot, "walk")
             local wanderPos = botRoot.Position + Vector3.new(
                 (math.random() - 0.5) * 20,
                 0,
