@@ -26,6 +26,9 @@ UIController._coinsLabel = nil
 UIController._phaseLabel = nil
 UIController._tagNotification = nil
 UIController._countdownLabel = nil
+UIController._statusFrame = nil
+UIController._statusTitle = nil
+UIController._statusSubtitle = nil
 
 function UIController:Init()
     print("[UIController] Initializing...")
@@ -54,6 +57,7 @@ function UIController:_createHUD()
     self:_createPhaseIndicator()
     self:_createTagNotification()
     self:_createCountdownDisplay()
+    self:_createStatusDisplay()
 end
 
 function UIController:_createTimerDisplay()
@@ -206,6 +210,44 @@ function UIController:_createCountdownDisplay()
     self._countdownLabel.Parent = self._screenGui
 end
 
+function UIController:_createStatusDisplay()
+    self._statusFrame = Instance.new("Frame")
+    self._statusFrame.Name = "StatusDisplay"
+    self._statusFrame.Size = UDim2.new(0, 420, 0, 140)
+    self._statusFrame.Position = UDim2.new(0.5, -210, 0.3, 0)
+    self._statusFrame.BackgroundColor3 = GameConfig.StateBackgrounds.Dark
+    self._statusFrame.BackgroundTransparency = 0.25
+    self._statusFrame.BorderSizePixel = 0
+    self._statusFrame.Visible = false
+    self._statusFrame.Parent = self._screenGui
+
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 12)
+    corner.Parent = self._statusFrame
+
+    self._statusTitle = Instance.new("TextLabel")
+    self._statusTitle.Name = "StatusTitle"
+    self._statusTitle.Text = ""
+    self._statusTitle.TextSize = 28
+    self._statusTitle.Font = Enum.Font.GothamBold
+    self._statusTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
+    self._statusTitle.BackgroundTransparency = 1
+    self._statusTitle.Size = UDim2.new(1, -20, 0, 50)
+    self._statusTitle.Position = UDim2.new(0, 10, 0, 15)
+    self._statusTitle.Parent = self._statusFrame
+
+    self._statusSubtitle = Instance.new("TextLabel")
+    self._statusSubtitle.Name = "StatusSubtitle"
+    self._statusSubtitle.Text = ""
+    self._statusSubtitle.TextSize = 20
+    self._statusSubtitle.Font = Enum.Font.Gotham
+    self._statusSubtitle.TextColor3 = Color3.fromRGB(200, 200, 200)
+    self._statusSubtitle.BackgroundTransparency = 1
+    self._statusSubtitle.Size = UDim2.new(1, -20, 0, 40)
+    self._statusSubtitle.Position = UDim2.new(0, 10, 0, 70)
+    self._statusSubtitle.Parent = self._statusFrame
+end
+
 -- Public methods called by RoundController
 
 function UIController:ShowRoleBanner(role)
@@ -328,10 +370,63 @@ function UIController:SetPhaseText(phase)
         end
     end
 
-    -- Clear banner on lobby
+    -- Manage status display per phase
     if phase == Constants.PHASES.LOBBY then
         self:HideRoleBanner()
+        self:_showStatus("WAITING FOR PLAYERS", "Looking for players...")
+    elseif phase == Constants.PHASES.COUNTDOWN then
+        self:_showStatus("GET READY!", "")
+    elseif phase == Constants.PHASES.PLAYING then
+        self:_hideStatus()
+    elseif phase == Constants.PHASES.RESULTS then
+        self:_hideStatus()
+    elseif phase == Constants.PHASES.INTERMISSION then
+        self:_showStatus("INTERMISSION", "Next round starting soon...")
     end
+end
+
+function UIController:_showStatus(title, subtitle)
+    if self._statusFrame then
+        self._statusFrame.Visible = true
+    end
+    if self._statusTitle then
+        self._statusTitle.Text = title or ""
+    end
+    if self._statusSubtitle then
+        self._statusSubtitle.Text = subtitle or ""
+    end
+end
+
+function UIController:_hideStatus()
+    if self._statusFrame then
+        self._statusFrame.Visible = false
+    end
+end
+
+function UIController:UpdateLobbyStatus(lobbyStatus, playerCount, targetCount, timeRemaining)
+    if not self._statusFrame or not self._statusTitle or not self._statusSubtitle then
+        return
+    end
+
+    if lobbyStatus == "waiting" then
+        self._statusTitle.Text = "WAITING FOR PLAYERS"
+        self._statusSubtitle.Text = playerCount .. "/" .. targetCount .. " players"
+        self._statusFrame.Visible = true
+    elseif lobbyStatus == "starting" then
+        self._statusTitle.Text = "GAME STARTING"
+        self._statusSubtitle.Text = "Starting in " .. timeRemaining .. "s"
+        self._statusFrame.Visible = true
+    end
+end
+
+function UIController:UpdateIntermissionTimer(timeRemaining)
+    if not self._statusFrame or not self._statusTitle or not self._statusSubtitle then
+        return
+    end
+
+    self._statusTitle.Text = "NEXT ROUND"
+    self._statusSubtitle.Text = timeRemaining .. "s"
+    self._statusFrame.Visible = true
 end
 
 function UIController:ShowCountdown(number)
@@ -342,9 +437,10 @@ function UIController:ShowCountdown(number)
     self._countdownLabel.Text = tostring(number)
     self._countdownLabel.Visible = true
     self._countdownLabel.TextTransparency = 0
-
-    -- Quick scale-in effect
     self._countdownLabel.TextSize = 72
+
+    -- Keep the status display showing "GET READY!" during countdown
+    self:_showStatus("GET READY!", "")
 end
 
 function UIController:HideCountdown()

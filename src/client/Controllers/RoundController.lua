@@ -70,6 +70,8 @@ function RoundController:_onPhaseUpdate(phase)
         UIController:UpdateTimer(0)
     elseif phase == Constants.PHASES.COUNTDOWN then
         TagController:StopDetection()
+    elseif phase == Constants.PHASES.PLAYING then
+        UIController:HideCountdown()
     elseif phase == Constants.PHASES.RESULTS then
         TagController:StopDetection()
     elseif phase == Constants.PHASES.INTERMISSION then
@@ -78,9 +80,21 @@ function RoundController:_onPhaseUpdate(phase)
 end
 
 function RoundController:_onRoundStateUpdate(stateData)
+    -- Handle lobby status updates
+    if stateData.phase == Constants.PHASES.LOBBY and stateData.lobbyStatus then
+        UIController:UpdateLobbyStatus(stateData.lobbyStatus, stateData.playerCount, stateData.targetCount, stateData.timeRemaining)
+        return
+    end
+
     -- Handle countdown
     if stateData.phase == Constants.PHASES.COUNTDOWN and stateData.countdown then
         UIController:ShowCountdown(stateData.countdown)
+        return
+    end
+
+    -- Handle intermission timer
+    if stateData.phase == Constants.PHASES.INTERMISSION and stateData.timeRemaining then
+        UIController:UpdateIntermissionTimer(stateData.timeRemaining)
         return
     end
 

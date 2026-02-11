@@ -57,6 +57,13 @@ Constants.COINS_PER_TAG = 5
 Constants.COINS_PER_WIN = 25
 Constants.COINS_PER_ROUND = 10
 
+-- Bots
+Constants.BOT_FILL_TARGET = 4 -- Auto-fill games to this many total participants
+Constants.BOT_UPDATE_INTERVAL = 0.3 -- AI decision frequency (seconds)
+Constants.BOT_FLEE_DISTANCE = 40 -- How far runner bots flee from tagger
+Constants.BOT_RANDOM_OFFSET = 15 -- Random movement variation for organic feel
+Constants.BOT_NAMES = { "Bolt", "Dash", "Flash", "Blitz", "Zippy", "Turbo", "Rocket", "Swift", "Storm", "Spark" }
+
 -- Powerups
 Constants.POWERUP_SPAWN_INTERVAL = 15
 Constants.POWERUP_DURATION = 8

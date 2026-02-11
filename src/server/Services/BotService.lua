@@ -1,0 +1,484 @@
+--[[
+    BotService
+    Manages AI bots: spawning, character creation, movement AI, auto-fill logic
+    Bots act as participants in rounds alongside real players.
+]]
+
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Constants = require(Shared:WaitForChild("Config"):WaitForChild("Constants"))
+
+local BotService = {}
+
+-- State
+BotService._bots = {} -- Array of active bot objects
+BotService._nextBotId = -1 -- Negative UserId to avoid collision with real players
+BotService._aiThreads = {} -- {[botUserId]: thread}
+BotService._usedNames = {} -- Track which names are in use
+BotService._roundService = nil -- Set during Start
+
+-- Bot ground height for minimal rig PivotTo movement
+local BOT_GROUND_Y = 3
+
+function BotService:Init()
+    print("[BotService] Initializing...")
+end
+
+function BotService:Start()
+    print("[BotService] Starting...")
+
+    -- Auto-fill: check player count when players join or leave
+    Players.PlayerAdded:Connect(function()
+        self:_onPlayerCountChanged()
+    end)
+
+    Players.PlayerRemoving:Connect(function()
+        -- Delay slightly so the player is actually removed from GetPlayers()
+        task.delay(0.1, function()
+            self:_onPlayerCountChanged()
+        end)
+    end)
+
+    -- Initial check
+    self:_onPlayerCountChanged()
+end
+
+function BotService:SetRoundService(roundService)
+    self._roundService = roundService
+end
+
+-- Auto-fill logic: maintain BOT_FILL_TARGET total participants
+function BotService:_onPlayerCountChanged()
+    local realPlayerCount = #Players:GetPlayers()
+    local currentBotCount = #self._bots
+    local totalParticipants = realPlayerCount + currentBotCount
+    local target = Constants.BOT_FILL_TARGET
+
+    if totalParticipants < target then
+        -- Need more bots
+        local botsNeeded = target - totalParticipants
+        for _ = 1, botsNeeded do
+            self:SpawnBot()
+        end
+    elseif realPlayerCount >= target and currentBotCount > 0 then
+        -- Enough real players, remove all bots
+        self:RemoveAllBots()
+    elseif totalParticipants > target and currentBotCount > 0 then
+        -- Too many participants, remove excess bots
+        local excess = totalParticipants - target
+        local toRemove = math.min(excess, currentBotCount)
+        for _ = 1, toRemove do
+            self:RemoveBot()
+        end
+    end
+end
+
+function BotService:SpawnBot()
+    local botId = self._nextBotId
+    self._nextBotId = self._nextBotId - 1
+
+    local botName = self:_pickBotName()
+
+    -- Create the character model
+    local character, isMinimalRig = self:_createCharacter(botName)
+    if not character then
+        warn("[BotService] Failed to create character for", botName)
+        return nil
+    end
+
+    local bot = {
+        UserId = botId,
+        Name = botName,
+        Character = character,
+        IsBot = true,
+        IsMinimalRig = isMinimalRig,
+    }
+
+    table.insert(self._bots, bot)
+    print("[BotService] Spawned bot:", botName, "(ID:", botId, ") minimal:", isMinimalRig)
+    return bot
+end
+
+function BotService:RemoveBot(specificBot)
+    local bot = specificBot
+    if not bot and #self._bots > 0 then
+        bot = self._bots[#self._bots] -- Remove last bot
+    end
+
+    if not bot then
+        return
+    end
+
+    -- Stop AI thread
+    self:StopAI(bot)
+
+    -- Destroy character
+    if bot.Character then
+        bot.Character:Destroy()
+    end
+
+    -- Remove from list
+    for i, b in ipairs(self._bots) do
+        if b.UserId == bot.UserId then
+            table.remove(self._bots, i)
+            break
+        end
+    end
+
+    -- Free the name
+    self._usedNames[bot.Name] = nil
+
+    print("[BotService] Removed bot:", bot.Name)
+end
+
+function BotService:RemoveAllBots()
+    while #self._bots > 0 do
+        self:RemoveBot()
+    end
+end
+
+function BotService:GetActiveBots()
+    return self._bots
+end
+
+function BotService:IsBot(participant)
+    return participant.IsBot == true
+end
+
+-- Character Creation
+
+function BotService:_createCharacter(name)
+    -- Try creating a proper R6 rig via CreateHumanoidModelFromDescription
+    -- This produces a full character with Motor6D joints that supports Humanoid:MoveTo()
+    local success, model = pcall(function()
+        local description = Instance.new("HumanoidDescription")
+        return Players:CreateHumanoidModelFromDescription(description, Enum.HumanoidRigType.R6)
+    end)
+
+    if success and model then
+        model.Name = name
+        model.Parent = Workspace
+
+        local humanoid = model:FindFirstChild("Humanoid")
+        if humanoid then
+            humanoid.WalkSpeed = Constants.DEFAULT_WALK_SPEED
+            humanoid.DisplayName = name
+        end
+
+        print("[BotService] Created R6 rig for", name)
+        return model, false -- not a minimal rig
+    end
+
+    -- Fallback: create a minimal anchored rig (uses PivotTo for movement)
+    warn("[BotService] CreateHumanoidModelFromDescription failed, creating minimal rig for", name)
+    local minimal = self:_createMinimalCharacter(name)
+    return minimal, true -- is a minimal rig
+end
+
+function BotService:_createMinimalCharacter(name)
+    local model = Instance.new("Model")
+    model.Name = name
+
+    -- All parts anchored — movement handled via Model:PivotTo()
+    local rootPart = Instance.new("Part")
+    rootPart.Name = "HumanoidRootPart"
+    rootPart.Size = Vector3.new(2, 2, 1)
+    rootPart.Position = Vector3.new(0, 3, 0)
+    rootPart.Anchored = true
+    rootPart.CanCollide = true
+    rootPart.Transparency = 1
+    rootPart.Parent = model
+
+    local head = Instance.new("Part")
+    head.Name = "Head"
+    head.Shape = Enum.PartType.Ball
+    head.Size = Vector3.new(2, 2, 2)
+    head.Position = Vector3.new(0, 4.5, 0)
+    head.Anchored = true
+    head.CanCollide = false
+    head.Color = Color3.fromRGB(245, 205, 140)
+    head.Parent = model
+
+    local torso = Instance.new("Part")
+    torso.Name = "Torso"
+    torso.Size = Vector3.new(2, 2, 1)
+    torso.Position = Vector3.new(0, 3, 0)
+    torso.Anchored = true
+    torso.CanCollide = false
+    torso.Color = Color3.fromRGB(40, 120, 200)
+    torso.Parent = model
+
+    local humanoid = Instance.new("Humanoid")
+    humanoid.WalkSpeed = Constants.DEFAULT_WALK_SPEED
+    humanoid.DisplayName = name
+    humanoid.Parent = model
+
+    -- Nametag
+    local nameLabel = Instance.new("BillboardGui")
+    nameLabel.Name = "BotNametag"
+    nameLabel.Size = UDim2.new(0, 100, 0, 30)
+    nameLabel.StudsOffset = Vector3.new(0, 3, 0)
+    nameLabel.Adornee = head
+    nameLabel.Parent = head
+
+    local textLabel = Instance.new("TextLabel")
+    textLabel.Text = name
+    textLabel.Size = UDim2.new(1, 0, 1, 0)
+    textLabel.BackgroundTransparency = 1
+    textLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+    textLabel.TextStrokeTransparency = 0.5
+    textLabel.Font = Enum.Font.GothamBold
+    textLabel.TextSize = 14
+    textLabel.Parent = nameLabel
+
+    model.PrimaryPart = rootPart
+    model.Parent = Workspace
+
+    return model
+end
+
+function BotService:_pickBotName()
+    for _, name in ipairs(Constants.BOT_NAMES) do
+        if not self._usedNames[name] then
+            self._usedNames[name] = true
+            return name
+        end
+    end
+    -- Fallback if all names taken
+    local name = "Bot_" .. math.abs(self._nextBotId)
+    self._usedNames[name] = true
+    return name
+end
+
+-- Movement
+
+-- Move a bot toward a target position using the appropriate method
+function BotService:_moveBot(bot, targetPos)
+    if bot.IsMinimalRig then
+        self:_moveBotPivot(bot, targetPos)
+    else
+        self:_moveBotHumanoid(bot, targetPos)
+    end
+end
+
+-- Standard movement via Humanoid:MoveTo() (for proper R6/R15 rigs)
+function BotService:_moveBotHumanoid(bot, targetPos)
+    local humanoid = bot.Character and bot.Character:FindFirstChild("Humanoid")
+    if humanoid then
+        humanoid:MoveTo(targetPos)
+    end
+end
+
+-- Fallback movement via Model:PivotTo() (for anchored minimal rigs)
+function BotService:_moveBotPivot(bot, targetPos)
+    if not bot.Character or not bot.Character.PrimaryPart then
+        return
+    end
+
+    local rootPart = bot.Character.PrimaryPart
+    local humanoid = bot.Character:FindFirstChild("Humanoid")
+    local speed = humanoid and humanoid.WalkSpeed or Constants.DEFAULT_WALK_SPEED
+
+    local currentPos = rootPart.Position
+    local direction = Vector3.new(targetPos.X - currentPos.X, 0, targetPos.Z - currentPos.Z)
+
+    if direction.Magnitude < 0.5 then
+        return
+    end
+
+    local moveDir = direction.Unit
+    local moveDistance = math.min(speed * Constants.BOT_UPDATE_INTERVAL, direction.Magnitude)
+    local newPos = Vector3.new(
+        currentPos.X + moveDir.X * moveDistance,
+        BOT_GROUND_Y,
+        currentPos.Z + moveDir.Z * moveDistance
+    )
+
+    bot.Character:PivotTo(CFrame.new(newPos, newPos + moveDir))
+end
+
+-- AI Control
+
+function BotService:StartAI(bot, role, roundState)
+    self:StopAI(bot)
+
+    print("[BotService] Starting AI for", bot.Name, "as", role)
+    self._aiThreads[bot.UserId] = task.spawn(function()
+        local success, err = pcall(function()
+            if role == Constants.ROLES.TAGGER then
+                self:_taggerAI(bot, roundState)
+            else
+                self:_runnerAI(bot, roundState)
+            end
+        end)
+        if not success then
+            warn("[BotService] AI error for", bot.Name, ":", err)
+        end
+    end)
+end
+
+function BotService:StopAI(bot)
+    if self._aiThreads[bot.UserId] then
+        task.cancel(self._aiThreads[bot.UserId])
+        self._aiThreads[bot.UserId] = nil
+    end
+end
+
+function BotService:StopAllAI()
+    for botId, thread in pairs(self._aiThreads) do
+        task.cancel(thread)
+        self._aiThreads[botId] = nil
+    end
+end
+
+function BotService:_taggerAI(bot, roundState)
+    local humanoid = bot.Character and bot.Character:FindFirstChild("Humanoid")
+    if not humanoid then
+        warn("[BotService] No humanoid for tagger", bot.Name)
+        return
+    end
+
+    humanoid.WalkSpeed = Constants.DEFAULT_WALK_SPEED + Constants.TAGGER_SPEED_BOOST
+
+    while true do
+        if not bot.Character or not bot.Character.Parent then
+            break
+        end
+
+        local botRoot = bot.Character:FindFirstChild("HumanoidRootPart")
+        if not botRoot then
+            break
+        end
+
+        -- Find nearest untagged runner
+        local nearestTarget = nil
+        local nearestDist = math.huge
+
+        if roundState and roundState.Runners then
+            for _, runner in ipairs(roundState.Runners) do
+                if not roundState.TaggedPlayers[runner.UserId] then
+                    local targetChar = runner.Character
+                    if targetChar then
+                        local targetRoot = targetChar:FindFirstChild("HumanoidRootPart")
+                        if targetRoot then
+                            local dist = (targetRoot.Position - botRoot.Position).Magnitude
+                            if dist < nearestDist then
+                                nearestDist = dist
+                                nearestTarget = targetRoot
+                            end
+                        end
+                    end
+                end
+            end
+        end
+
+        if nearestTarget then
+            local targetPos = nearestTarget.Position
+            local offset = Vector3.new(
+                (math.random() - 0.5) * 4,
+                0,
+                (math.random() - 0.5) * 4
+            )
+            self:_moveBot(bot, targetPos + offset)
+
+            -- Check if close enough to tag
+            if nearestDist <= Constants.TAG_RANGE and self._roundService then
+                self._roundService:BotTag(bot, nearestTarget.Parent)
+            end
+        else
+            -- No target, wander randomly
+            local wanderPos = botRoot.Position + Vector3.new(
+                (math.random() - 0.5) * 30,
+                0,
+                (math.random() - 0.5) * 30
+            )
+            self:_moveBot(bot, wanderPos)
+        end
+
+        task.wait(Constants.BOT_UPDATE_INTERVAL)
+    end
+end
+
+function BotService:_runnerAI(bot, roundState)
+    local humanoid = bot.Character and bot.Character:FindFirstChild("Humanoid")
+    if not humanoid then
+        warn("[BotService] No humanoid for runner", bot.Name)
+        return
+    end
+
+    humanoid.WalkSpeed = Constants.DEFAULT_WALK_SPEED
+
+    while true do
+        if not bot.Character or not bot.Character.Parent then
+            break
+        end
+
+        local botRoot = bot.Character:FindFirstChild("HumanoidRootPart")
+        if not botRoot then
+            break
+        end
+
+        -- Check if this bot has been tagged
+        if roundState and roundState.TaggedPlayers[bot.UserId] then
+            task.wait(Constants.BOT_UPDATE_INTERVAL)
+            continue
+        end
+
+        -- Find the nearest tagger to flee from
+        local nearestTagger = nil
+        local nearestDist = math.huge
+
+        if roundState and roundState.Taggers then
+            for _, tagger in ipairs(roundState.Taggers) do
+                local taggerChar = tagger.Character
+                if taggerChar then
+                    local taggerRoot = taggerChar:FindFirstChild("HumanoidRootPart")
+                    if taggerRoot then
+                        local dist = (taggerRoot.Position - botRoot.Position).Magnitude
+                        if dist < nearestDist then
+                            nearestDist = dist
+                            nearestTagger = taggerRoot
+                        end
+                    end
+                end
+            end
+        end
+
+        if nearestTagger and nearestDist < Constants.BOT_FLEE_DISTANCE then
+            -- Flee from tagger (move in opposite direction)
+            local fleeDirection = (botRoot.Position - nearestTagger.Position).Unit
+            local randomOffset = Vector3.new(
+                (math.random() - 0.5) * Constants.BOT_RANDOM_OFFSET,
+                0,
+                (math.random() - 0.5) * Constants.BOT_RANDOM_OFFSET
+            )
+            local fleeTarget = botRoot.Position + fleeDirection * 20 + randomOffset
+            fleeTarget = Vector3.new(
+                math.clamp(fleeTarget.X, -55, 55),
+                fleeTarget.Y,
+                math.clamp(fleeTarget.Z, -55, 55)
+            )
+            self:_moveBot(bot, fleeTarget)
+        else
+            -- No nearby threat, wander randomly
+            local wanderPos = botRoot.Position + Vector3.new(
+                (math.random() - 0.5) * 20,
+                0,
+                (math.random() - 0.5) * 20
+            )
+            wanderPos = Vector3.new(
+                math.clamp(wanderPos.X, -55, 55),
+                wanderPos.Y,
+                math.clamp(wanderPos.Z, -55, 55)
+            )
+            self:_moveBot(bot, wanderPos)
+        end
+
+        task.wait(Constants.BOT_UPDATE_INTERVAL)
+    end
+end
+
+return BotService

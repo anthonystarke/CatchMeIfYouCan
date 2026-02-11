@@ -1,6 +1,7 @@
 --[[
     RoundService
     Manages game rounds: lobby, countdown, playing, results, intermission
+    Supports both real players and bots as participants.
 ]]
 
 local Players = game:GetService("Players")
@@ -13,6 +14,7 @@ local Utils = require(Shared:WaitForChild("Utils"))
 local Services = script.Parent
 local DataService = require(Services:WaitForChild("DataService"))
 local MapService = require(Services:WaitForChild("MapService"))
+local BotService = require(Services:WaitForChild("BotService"))
 
 local Helpers = script.Parent.Parent:WaitForChild("Helpers")
 local RemoteHelper = require(Helpers:WaitForChild("RemoteHelper"))
@@ -47,6 +49,9 @@ end
 function RoundService:Start()
     print("[RoundService] Starting...")
 
+    -- Give BotService a reference to us for bot tagging
+    BotService:SetRoundService(self)
+
     -- Bind tag event
     RemoteHelper:BindEvent(self._tagEvent, function(player, targetUserId)
         self:_handleTag(player, targetUserId)
@@ -71,6 +76,66 @@ function RoundService:GetRoundState()
     }
 end
 
+-- Safe bot check: Roblox Player instances throw on invalid property access,
+-- so we check the type first. Bots are plain Lua tables, players are Instances.
+local function isBot(participant)
+    return typeof(participant) == "table" and participant.IsBot == true
+end
+
+-- Get all participants (real players + bots)
+function RoundService:_getParticipants()
+    local participants = {}
+    for _, player in ipairs(Players:GetPlayers()) do
+        table.insert(participants, player)
+    end
+    for _, bot in ipairs(BotService:GetActiveBots()) do
+        table.insert(participants, bot)
+    end
+    return participants
+end
+
+-- Safe FireClient that skips bots
+function RoundService:_fireClient(participant, ...)
+    if isBot(participant) then
+        return
+    end
+    self._roundStateEvent:FireClient(participant, ...)
+end
+
+-- Find a participant (player or bot) by UserId
+function RoundService:_findParticipant(userId)
+    local player = Players:GetPlayerByUserId(userId)
+    if player then
+        return player
+    end
+    for _, bot in ipairs(BotService:GetActiveBots()) do
+        if bot.UserId == userId then
+            return bot
+        end
+    end
+    return nil
+end
+
+-- Called by BotService when a bot is close enough to tag
+function RoundService:BotTag(taggerBot, targetCharacter)
+    if not self._roundState or self._currentPhase ~= Constants.PHASES.PLAYING then
+        return
+    end
+
+    -- Find the target's UserId from their character
+    local targetUserId = nil
+    for _, runner in ipairs(self._roundState.Runners) do
+        if runner.Character == targetCharacter then
+            targetUserId = runner.UserId
+            break
+        end
+    end
+
+    if targetUserId then
+        self:_handleTag(taggerBot, targetUserId)
+    end
+end
+
 function RoundService:_roundLoop()
     while true do
         -- Lobby phase: wait for enough players
@@ -88,20 +153,27 @@ function RoundService:_roundLoop()
         -- Results phase
         self:_setPhase(Constants.PHASES.RESULTS)
         self:_processResults()
+        BotService:StopAllAI()
         task.wait(Constants.RESULTS_DISPLAY_TIME)
 
         -- Intermission phase
         self:_setPhase(Constants.PHASES.INTERMISSION)
-        task.wait(Constants.INTERMISSION_TIME)
+        for i = Constants.INTERMISSION_TIME, 1, -1 do
+            self._roundStateEvent:FireAllClients({
+                phase = Constants.PHASES.INTERMISSION,
+                timeRemaining = i,
+            })
+            task.wait(1)
+        end
 
         -- Clean up round state
         self._roundState = nil
         self._tagCooldowns = {}
         self._roundStats = {}
 
-        -- Reset player speeds
-        for _, player in ipairs(Players:GetPlayers()) do
-            self:_setWalkSpeed(player, Constants.DEFAULT_WALK_SPEED)
+        -- Reset all participant speeds
+        for _, participant in ipairs(self:_getParticipants()) do
+            self:_setWalkSpeed(participant, Constants.DEFAULT_WALK_SPEED)
         end
 
         MapService:CleanupRound()
@@ -115,15 +187,27 @@ function RoundService:_setPhase(phase)
 end
 
 function RoundService:_waitForPlayers()
-    while #Players:GetPlayers() < Constants.MIN_PLAYERS do
+    -- Wait until we have enough total participants (real players + bots)
+    while #self:_getParticipants() < Constants.MIN_PLAYERS do
+        self._roundStateEvent:FireAllClients({
+            phase = Constants.PHASES.LOBBY,
+            lobbyStatus = "waiting",
+            playerCount = #self:_getParticipants(),
+            targetCount = Constants.MIN_PLAYERS,
+        })
         task.wait(1)
     end
 
-    -- Wait the lobby time once we have enough players
-    local waited = 0
-    while waited < Constants.LOBBY_WAIT_TIME do
+    -- Wait the lobby time once we have enough
+    for i = Constants.LOBBY_WAIT_TIME, 1, -1 do
+        self._roundStateEvent:FireAllClients({
+            phase = Constants.PHASES.LOBBY,
+            lobbyStatus = "starting",
+            playerCount = #self:_getParticipants(),
+            targetCount = Constants.MIN_PLAYERS,
+            timeRemaining = i,
+        })
         task.wait(1)
-        waited = waited + 1
     end
 end
 
@@ -139,21 +223,21 @@ function RoundService:_countdown()
 end
 
 function RoundService:_playRound()
-    local players = Players:GetPlayers()
-    if #players < Constants.MIN_PLAYERS then
+    local participants = self:_getParticipants()
+    if #participants < Constants.MIN_PLAYERS then
         return
     end
 
-    -- Shuffle and assign roles
-    local shuffled = Utils.Shuffle(players)
+    -- Shuffle and assign roles (prefer real players as tagger for better experience)
+    local shuffled = Utils.Shuffle(participants)
     local taggers = {}
     local runners = {}
 
-    for i, player in ipairs(shuffled) do
+    for i, participant in ipairs(shuffled) do
         if i <= Constants.TAGGERS_PER_ROUND then
-            table.insert(taggers, player)
+            table.insert(taggers, participant)
         else
-            table.insert(runners, player)
+            table.insert(runners, participant)
         end
     end
 
@@ -166,10 +250,10 @@ function RoundService:_playRound()
         RoundEndTime = os.time() + Constants.ROUND_DURATION,
     }
 
-    -- Initialize per-player round stats
+    -- Initialize per-participant round stats
     self._roundStats = {}
-    for _, player in ipairs(players) do
-        self._roundStats[player.UserId] = {
+    for _, participant in ipairs(participants) do
+        self._roundStats[participant.UserId] = {
             tagsPerformed = 0,
             survivedSeconds = 0,
         }
@@ -181,21 +265,28 @@ function RoundService:_playRound()
         self:_setWalkSpeed(runner, Constants.DEFAULT_WALK_SPEED)
     end
 
-    -- Notify all clients of role assignments
-    for _, player in ipairs(taggers) do
-        self._roundStateEvent:FireClient(player, {
+    -- Notify real clients of role assignments (bots don't need UI)
+    for _, participant in ipairs(taggers) do
+        self:_fireClient(participant, {
             phase = Constants.PHASES.PLAYING,
             role = Constants.ROLES.TAGGER,
             roundState = self._roundState,
         })
     end
 
-    for _, player in ipairs(runners) do
-        self._roundStateEvent:FireClient(player, {
+    for _, participant in ipairs(runners) do
+        self:_fireClient(participant, {
             phase = Constants.PHASES.PLAYING,
             role = Constants.ROLES.RUNNER,
             roundState = self._roundState,
         })
+    end
+
+    -- Start bot AI for runner bots immediately
+    for _, runner in ipairs(runners) do
+        if isBot(runner) then
+            BotService:StartAI(runner, Constants.ROLES.RUNNER, self._roundState)
+        end
     end
 
     -- Tagger gets a 3-second head start delay, then teleports and gets speed boost
@@ -203,6 +294,11 @@ function RoundService:_playRound()
         for _, tagger in ipairs(taggers) do
             MapService:TeleportPlayerToSpawn(tagger, Constants.ROLES.TAGGER)
             self:_setWalkSpeed(tagger, Constants.DEFAULT_WALK_SPEED + Constants.TAGGER_SPEED_BOOST)
+
+            -- Start bot AI for tagger bots
+            if isBot(tagger) then
+                BotService:StartAI(tagger, Constants.ROLES.TAGGER, self._roundState)
+            end
         end
     end)
 
@@ -220,7 +316,7 @@ function RoundService:_playRound()
             end
         end
 
-        -- Broadcast timer update
+        -- Broadcast timer update to real clients
         self._roundStateEvent:FireAllClients({
             phase = Constants.PHASES.PLAYING,
             timeRemaining = self._roundTimer,
@@ -281,11 +377,11 @@ function RoundService:_handleTag(tagger, targetUserId)
 
     -- Server-side distance validation
     local taggerChar = tagger.Character
-    local targetPlayer = Players:GetPlayerByUserId(targetUserId)
-    if not targetPlayer then
+    local targetParticipant = self:_findParticipant(targetUserId)
+    if not targetParticipant then
         return
     end
-    local targetChar = targetPlayer.Character
+    local targetChar = targetParticipant.Character
 
     if not taggerChar or not targetChar then
         return
@@ -298,6 +394,7 @@ function RoundService:_handleTag(tagger, targetUserId)
     end
 
     local distance = (taggerRoot.Position - targetRoot.Position).Magnitude
+    -- Bots don't need network tolerance, but keep it consistent
     if distance > Constants.TAG_RANGE * Constants.TAG_RANGE_TOLERANCE then
         return
     end
@@ -305,17 +402,22 @@ function RoundService:_handleTag(tagger, targetUserId)
     -- Perform the tag
     self._roundState.TaggedPlayers[targetUserId] = true
     self._tagCooldowns[tagger.UserId] = now
-    print("[RoundService]", tagger.Name, "tagged", targetPlayer.Name)
+    print("[RoundService]", tagger.Name, "tagged", targetParticipant.Name)
 
     -- Update round stats
     if self._roundStats[tagger.UserId] then
         self._roundStats[tagger.UserId].tagsPerformed = self._roundStats[tagger.UserId].tagsPerformed + 1
     end
 
-    -- Freeze the tagged player
-    self:_freezePlayer(targetPlayer)
+    -- Freeze the tagged participant
+    self:_freezePlayer(targetParticipant)
 
-    -- Notify all clients
+    -- Stop AI for tagged bot runners
+    if isBot(targetParticipant) then
+        BotService:StopAI(targetParticipant)
+    end
+
+    -- Notify all real clients
     self._roundStateEvent:FireAllClients({
         phase = Constants.PHASES.PLAYING,
         tagEvent = {
@@ -326,20 +428,25 @@ function RoundService:_handleTag(tagger, targetUserId)
     })
 end
 
-function RoundService:_freezePlayer(player)
-    if not player.Character then
+function RoundService:_freezePlayer(participant)
+    if not participant.Character then
         return
     end
 
-    local humanoidRootPart = player.Character:FindFirstChild("HumanoidRootPart")
+    local humanoidRootPart = participant.Character:FindFirstChild("HumanoidRootPart")
     if humanoidRootPart then
         humanoidRootPart.Anchored = true
     end
 
-    -- Unfreeze after FREEZE_DURATION (player becomes spectator but stays frozen visually)
+    -- Unfreeze after FREEZE_DURATION
+    -- Minimal rig bots (IsMinimalRig) stay anchored since they use PivotTo movement
     task.delay(Constants.FREEZE_DURATION, function()
-        if player.Character then
-            local root = player.Character:FindFirstChild("HumanoidRootPart")
+        if not participant.Character then
+            return
+        end
+        local isMinimalRigBot = isBot(participant) and participant.IsMinimalRig
+        if not isMinimalRigBot then
+            local root = participant.Character:FindFirstChild("HumanoidRootPart")
             if root then
                 root.Anchored = false
             end
@@ -347,12 +454,12 @@ function RoundService:_freezePlayer(player)
     end)
 end
 
-function RoundService:_setWalkSpeed(player, speed)
-    if not player.Character then
+function RoundService:_setWalkSpeed(participant, speed)
+    if not participant.Character then
         return
     end
 
-    local humanoid = player.Character:FindFirstChild("Humanoid")
+    local humanoid = participant.Character:FindFirstChild("Humanoid")
     if humanoid then
         humanoid.WalkSpeed = speed
     end
@@ -385,16 +492,18 @@ function RoundService:_processResults()
             won = taggerWon,
         }
 
-        -- Update persistent data
-        local data = DataService:GetData(tagger)
-        if data then
-            data.Stats.RoundsPlayed = data.Stats.RoundsPlayed + 1
-            data.Stats.TotalTags = data.Stats.TotalTags + tagsCount
-            data.Stats.TotalPoints = data.Stats.TotalPoints + points
-            if taggerWon then
-                data.Stats.RoundsWonAsTagger = data.Stats.RoundsWonAsTagger + 1
+        -- Only update persistent data for real players (not bots)
+        if not isBot(tagger) then
+            local data = DataService:GetData(tagger)
+            if data then
+                data.Stats.RoundsPlayed = data.Stats.RoundsPlayed + 1
+                data.Stats.TotalTags = data.Stats.TotalTags + tagsCount
+                data.Stats.TotalPoints = data.Stats.TotalPoints + points
+                if taggerWon then
+                    data.Stats.RoundsWonAsTagger = data.Stats.RoundsWonAsTagger + 1
+                end
+                DataService:AddCoins(tagger, coins)
             end
-            DataService:AddCoins(tagger, coins)
         end
     end
 
@@ -420,21 +529,23 @@ function RoundService:_processResults()
             won = escaped,
         }
 
-        -- Update persistent data
-        local data = DataService:GetData(runner)
-        if data then
-            data.Stats.RoundsPlayed = data.Stats.RoundsPlayed + 1
-            data.Stats.TotalPoints = data.Stats.TotalPoints + points
-            data.Stats.LongestSurvival = math.max(data.Stats.LongestSurvival, survived)
-            if escaped then
-                data.Stats.TotalEscapes = data.Stats.TotalEscapes + 1
-                data.Stats.RoundsWonAsRunner = data.Stats.RoundsWonAsRunner + 1
+        -- Only update persistent data for real players (not bots)
+        if not isBot(runner) then
+            local data = DataService:GetData(runner)
+            if data then
+                data.Stats.RoundsPlayed = data.Stats.RoundsPlayed + 1
+                data.Stats.TotalPoints = data.Stats.TotalPoints + points
+                data.Stats.LongestSurvival = math.max(data.Stats.LongestSurvival, survived)
+                if escaped then
+                    data.Stats.TotalEscapes = data.Stats.TotalEscapes + 1
+                    data.Stats.RoundsWonAsRunner = data.Stats.RoundsWonAsRunner + 1
+                end
+                DataService:AddCoins(runner, coins)
             end
-            DataService:AddCoins(runner, coins)
         end
     end
 
-    -- Broadcast results to all clients
+    -- Broadcast results to all real clients
     self._roundStateEvent:FireAllClients({
         phase = Constants.PHASES.RESULTS,
         results = scores,
