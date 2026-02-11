@@ -9,6 +9,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Constants = require(Shared:WaitForChild("Config"):WaitForChild("Constants"))
+local GameConfig = require(Shared:WaitForChild("Config"):WaitForChild("GameConfig"))
 
 local Controllers = script.Parent
 local UIController = require(Controllers:WaitForChild("UIController"))
@@ -21,6 +22,8 @@ local RoundController = {}
 RoundController._currentPhase = Constants.PHASES.LOBBY
 RoundController._currentRole = nil
 RoundController._roundState = nil
+RoundController._chaseHighlight = nil -- Highlight instance on the chased runner
+RoundController._chaseTargetId = nil -- UserId of the currently highlighted runner
 
 function RoundController:Init()
     print("[RoundController] Initializing...")
@@ -63,6 +66,7 @@ function RoundController:_onPhaseUpdate(phase)
     if phase == Constants.PHASES.LOBBY then
         self._currentRole = nil
         self._roundState = nil
+        self:_clearChaseIndicator()
         TagController:StopDetection()
         MovementController:ResetSpeed()
         UIController:HideRoleBanner()
@@ -124,6 +128,9 @@ function RoundController:_onRoundStateUpdate(stateData)
             taggedCount = taggedCount + 1
         end
         UIController:UpdateRunnersRemaining(totalRunners - taggedCount, totalRunners)
+
+        -- Update chase indicator
+        self:_updateChaseIndicator(stateData.roundState)
     end
 
     -- Handle timer updates
@@ -165,6 +172,57 @@ end
 
 function RoundController:GetRoundState()
     return self._roundState
+end
+
+-- Chase indicator: show a Highlight on the runner the tagger is chasing
+function RoundController:_updateChaseIndicator(roundState)
+    local targetId = roundState.ChaseTargetId
+
+    -- Same target as before, nothing to do
+    if targetId == self._chaseTargetId then
+        return
+    end
+
+    -- Clear previous highlight
+    self:_clearChaseIndicator()
+
+    if not targetId then
+        return
+    end
+
+    -- Find the runner's character
+    local targetChar = nil
+    for _, runner in ipairs(roundState.Runners) do
+        if runner.UserId == targetId then
+            targetChar = runner.Character
+            break
+        end
+    end
+
+    if not targetChar or not targetChar:FindFirstChild("HumanoidRootPart") then
+        return
+    end
+
+    -- Create Highlight on the chased runner
+    local highlight = Instance.new("Highlight")
+    highlight.Name = "ChaseIndicator"
+    highlight.FillColor = GameConfig.RoleColors.Tagger
+    highlight.FillTransparency = 0.7
+    highlight.OutlineColor = GameConfig.RoleColors.Tagger
+    highlight.OutlineTransparency = 0
+    highlight.Adornee = targetChar
+    highlight.Parent = targetChar
+
+    self._chaseHighlight = highlight
+    self._chaseTargetId = targetId
+end
+
+function RoundController:_clearChaseIndicator()
+    if self._chaseHighlight then
+        self._chaseHighlight:Destroy()
+        self._chaseHighlight = nil
+    end
+    self._chaseTargetId = nil
 end
 
 return RoundController

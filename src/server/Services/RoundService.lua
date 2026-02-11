@@ -113,7 +113,62 @@ function RoundService:_getClientRoundState()
         TaggedPlayers = self._roundState.TaggedPlayers,
         RoundStartTime = self._roundState.RoundStartTime,
         RoundEndTime = self._roundState.RoundEndTime,
+        ChaseTargetId = self:_getChaseTargetId(),
     }
+end
+
+-- Determine which runner the tagger is actively chasing.
+-- Bot taggers: use their committed_target from AI state.
+-- Real player taggers: find the nearest untagged runner.
+function RoundService:_getChaseTargetId()
+    if not self._roundState or self._currentPhase ~= Constants.PHASES.PLAYING then
+        return nil
+    end
+
+    for _, tagger in ipairs(self._roundState.Taggers) do
+        -- Bot tagger: use committed target from AI state
+        if isBot(tagger) and tagger.TaggerState and tagger.TaggerState.committed_target then
+            local target = tagger.TaggerState.committed_target
+            if target.Parent then
+                -- Find the runner UserId that owns this HumanoidRootPart
+                for _, runner in ipairs(self._roundState.Runners) do
+                    if runner.Character and runner.Character:FindFirstChild("HumanoidRootPart") == target then
+                        return runner.UserId
+                    end
+                end
+            end
+        end
+
+        -- Real player tagger: find nearest untagged runner
+        if not isBot(tagger) then
+            local taggerChar = tagger.Character
+            if taggerChar then
+                local taggerRoot = taggerChar:FindFirstChild("HumanoidRootPart")
+                if taggerRoot then
+                    local nearestId = nil
+                    local nearestDist = math.huge
+                    for _, runner in ipairs(self._roundState.Runners) do
+                        if not self._roundState.TaggedPlayers[runner.UserId] then
+                            local runnerChar = runner.Character
+                            if runnerChar then
+                                local runnerRoot = runnerChar:FindFirstChild("HumanoidRootPart")
+                                if runnerRoot then
+                                    local dist = (runnerRoot.Position - taggerRoot.Position).Magnitude
+                                    if dist < nearestDist then
+                                        nearestDist = dist
+                                        nearestId = runner.UserId
+                                    end
+                                end
+                            end
+                        end
+                    end
+                    return nearestId
+                end
+            end
+        end
+    end
+
+    return nil
 end
 
 -- Get all participants (real players + bots)
