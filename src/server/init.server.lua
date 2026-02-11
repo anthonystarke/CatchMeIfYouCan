@@ -6,6 +6,9 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Constants = require(Shared:WaitForChild("Config"):WaitForChild("Constants"))
+
 print("[Server] Catch Me If You Can starting...")
 
 -- Get or create Remotes folder
@@ -19,19 +22,32 @@ end
 -- Require services
 local Services = script:WaitForChild("Services")
 local DataService = require(Services:WaitForChild("DataService"))
+local MapService = require(Services:WaitForChild("MapService"))
 local RoundService = require(Services:WaitForChild("RoundService"))
 
--- Initialize services (order matters - DataService first)
+-- Initialize services (order matters - DataService first, then MapService, then RoundService)
 DataService:Init()
+MapService:Init()
 RoundService:Init()
 
 -- Start services
 DataService:Start()
+MapService:Start()
 RoundService:Start()
 
 -- Handle player join
 local function onPlayerAdded(player)
     print("[Server] Player joined:", player.Name)
+
+    local function onCharacterAdded(character)
+        local humanoid = character:WaitForChild("Humanoid")
+        humanoid.WalkSpeed = Constants.DEFAULT_WALK_SPEED
+    end
+
+    if player.Character then
+        onCharacterAdded(player.Character)
+    end
+    player.CharacterAdded:Connect(onCharacterAdded)
 end
 
 -- Handle player leave

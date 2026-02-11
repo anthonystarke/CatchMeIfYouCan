@@ -16,18 +16,24 @@ ReplicatedStorage:WaitForChild("Remotes")
 
 -- Require controllers
 local Controllers = script:WaitForChild("Controllers")
-local UIController = require(Controllers:WaitForChild("UIController"))
-local RoundController = require(Controllers:WaitForChild("RoundController"))
 local SettingsController = require(Controllers:WaitForChild("SettingsController"))
+local UIController = require(Controllers:WaitForChild("UIController"))
+local MovementController = require(Controllers:WaitForChild("MovementController"))
+local TagController = require(Controllers:WaitForChild("TagController"))
+local RoundController = require(Controllers:WaitForChild("RoundController"))
 
 -- Initialize controllers (order matters)
 SettingsController:Init()
 UIController:Init()
+MovementController:Init()
+TagController:Init()
 RoundController:Init()
 
 -- Start controllers
 SettingsController:Start()
 UIController:Start()
+MovementController:Start()
+TagController:Start()
 RoundController:Start()
 
 -- Currency update handling

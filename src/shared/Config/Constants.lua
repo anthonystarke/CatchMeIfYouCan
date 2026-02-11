@@ -45,6 +45,7 @@ Constants.RUNNER_SPEED_BOOST = 0
 -- Tag mechanics
 Constants.TAG_COOLDOWN = 1.5
 Constants.TAG_RANGE = 6
+Constants.TAG_RANGE_TOLERANCE = 1.5 -- Server-side multiplier for network latency
 Constants.FREEZE_DURATION = 3
 
 -- Scoring
