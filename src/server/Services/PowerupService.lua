@@ -151,6 +151,27 @@ function PowerupService:ConsumeShield(userId)
     })
 end
 
+-- Return pad states so BotService can scan for nearby powerups
+function PowerupService:GetPadStates()
+    return self._padStates
+end
+
+-- Bot picks up and immediately uses a powerup (server-side only, no remotes)
+function PowerupService:BotPickupAndUse(bot, padIndex)
+    local pickupResult = self:_handlePickup(bot, padIndex)
+    if not pickupResult.success then
+        return false
+    end
+
+    -- Shield is passive (stored until consumed by a tag), skip activation
+    local powerup = self._playerPowerups[bot.UserId]
+    if powerup and powerup.type ~= Constants.POWERUP_TYPES.SHIELD then
+        self:_handleActivate(bot)
+    end
+
+    return true
+end
+
 -- Clean up powerup state for a disconnected player
 function PowerupService:RemovePlayer(userId)
     if self._effectTimers[userId] then

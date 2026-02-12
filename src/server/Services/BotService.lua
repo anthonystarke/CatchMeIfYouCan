@@ -14,6 +14,7 @@ local Services = script.Parent
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Constants = require(Shared:WaitForChild("Config"):WaitForChild("Constants"))
 local MapService = require(Services:WaitForChild("MapService"))
+local PowerupService = require(Services:WaitForChild("PowerupService"))
 
 local BotService = {}
 
@@ -740,6 +741,24 @@ function BotService:_checkAndRecoverStuck(bot, state, botRoot)
     return true
 end
 
+-- Opportunistic powerup pickup: grab any powerup the bot walks near
+function BotService:_checkNearbyPowerups(bot, botRoot)
+    local padStates = PowerupService:GetPadStates()
+    if not padStates or #padStates == 0 then
+        return
+    end
+
+    for i, padState in ipairs(padStates) do
+        if padState.powerupType then
+            local dist = (botRoot.Position - padState.position).Magnitude
+            if dist <= Constants.POWERUP_PICKUP_RANGE then
+                PowerupService:BotPickupAndUse(bot, i)
+                return
+            end
+        end
+    end
+end
+
 function BotService:_taggerAI(bot, roundState)
     local humanoid = bot.Character and bot.Character:FindFirstChild("Humanoid")
     if not humanoid then
@@ -765,6 +784,9 @@ function BotService:_taggerAI(bot, roundState)
 
         -- Stuck detection: recover if bot hasn't moved
         self:_checkAndRecoverStuck(bot, state, botRoot)
+
+        -- Opportunistic powerup pickup
+        self:_checkNearbyPowerups(bot, botRoot)
 
         -- Reassess targets on reaction timer
         if now >= state.reaction_ready_at then
@@ -876,6 +898,9 @@ function BotService:_runnerAI(bot, roundState)
 
         -- Stuck detection: recover if bot hasn't moved
         self:_checkAndRecoverStuck(bot, state, botRoot)
+
+        -- Opportunistic powerup pickup
+        self:_checkNearbyPowerups(bot, botRoot)
 
         -- Threat assessment on reaction timer
         if now >= state.reaction_ready_at then

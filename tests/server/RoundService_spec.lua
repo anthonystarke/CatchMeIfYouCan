@@ -87,6 +87,8 @@ local PowerupServiceStub = {
     HasShield = function() return false end,
     ConsumeShield = function() end,
     RemovePlayer = function() end,
+    GetPadStates = function() return {} end,
+    BotPickupAndUse = function() return false end,
 }
 
 local RemoteHelperStub = {
