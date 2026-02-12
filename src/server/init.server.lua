@@ -24,18 +24,21 @@ local Services = script:WaitForChild("Services")
 local DataService = require(Services:WaitForChild("DataService"))
 local MapService = require(Services:WaitForChild("MapService"))
 local BotService = require(Services:WaitForChild("BotService"))
+local PowerupService = require(Services:WaitForChild("PowerupService"))
 local RoundService = require(Services:WaitForChild("RoundService"))
 
 -- Initialize services (order matters)
 DataService:Init()
 MapService:Init()
 BotService:Init()
+PowerupService:Init()
 RoundService:Init()
 
 -- Start services
 DataService:Start()
 MapService:Start()
 BotService:Start()
+PowerupService:Start()
 RoundService:Start()
 
 -- Handle player join

@@ -32,12 +32,19 @@ GameConfig.RoleColors = {
     Spectator = Color3.fromRGB(150, 150, 150),
 }
 
--- Powerup types and their colors
+-- Powerup types: colors and display names
 GameConfig.PowerupColors = {
     SpeedBoost = Color3.fromRGB(255, 255, 100),
-    Invisibility = Color3.fromRGB(200, 200, 255),
     Shield = Color3.fromRGB(100, 255, 100),
-    Freeze = Color3.fromRGB(100, 200, 255),
+    MegaJump = Color3.fromRGB(255, 180, 50),
+    Teleport = Color3.fromRGB(180, 100, 255),
+}
+
+GameConfig.PowerupNames = {
+    SpeedBoost = "Speed Boost",
+    Shield = "Shield",
+    MegaJump = "Mega Jump",
+    Teleport = "Teleport",
 }
 
 -- Semantic state backgrounds

@@ -134,6 +134,21 @@ Constants.BOT_ANIM_RUN_R6 = "rbxassetid://180426354"
 -- Powerups
 Constants.POWERUP_SPAWN_INTERVAL = 15
 Constants.POWERUP_DURATION = 8
+Constants.POWERUP_PICKUP_RANGE = 6
+Constants.POWERUP_SPEED_BOOST_MULT = 1.5
+Constants.POWERUP_SPEED_BOOST_DURATION = 5
+Constants.POWERUP_MEGA_JUMP_MULT = 3
+Constants.POWERUP_MEGA_JUMP_DURATION = 8
+Constants.POWERUP_SHIELD_DURATION = 0 -- Lasts until consumed
+Constants.POWERUP_TELEPORT_DURATION = 0 -- Instant
+
+-- Powerup types
+Constants.POWERUP_TYPES = {
+    SPEED_BOOST = "SpeedBoost",
+    SHIELD = "Shield",
+    MEGA_JUMP = "MegaJump",
+    TELEPORT = "Teleport",
+}
 
 -- Data store version
 Constants.DATA_STORE_KEY = "PlayerData_v1"

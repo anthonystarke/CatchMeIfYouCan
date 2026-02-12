@@ -79,6 +79,16 @@ local BotServiceStub = {
     StopAllAI = function() end,
 }
 
+local PowerupServiceStub = {
+    Init = function() end,
+    Start = function() end,
+    OnRoundStart = function() end,
+    OnRoundEnd = function() end,
+    HasShield = function() return false end,
+    ConsumeShield = function() end,
+    RemovePlayer = function() end,
+}
+
 local RemoteHelperStub = {
     CreateEvent = function(_, name)
         return RemotesMock.RemoteEvent.new(name)
@@ -100,6 +110,7 @@ local utilsModule = mockInstance("Utils")
 local dataServiceModule = mockInstance("DataService")
 local mapServiceModule = mockInstance("MapService")
 local botServiceModule = mockInstance("BotService")
+local powerupServiceModule = mockInstance("PowerupService")
 local remoteHelperModule = mockInstance("RemoteHelper")
 
 moduleMap[constantsModule] = Constants
@@ -107,6 +118,7 @@ moduleMap[utilsModule] = Utils
 moduleMap[dataServiceModule] = DataServiceStub
 moduleMap[mapServiceModule] = MapServiceStub
 moduleMap[botServiceModule] = BotServiceStub
+moduleMap[powerupServiceModule] = PowerupServiceStub
 moduleMap[remoteHelperModule] = RemoteHelperStub
 
 -- Build the WaitForChild tree that RoundService expects
@@ -118,6 +130,7 @@ local servicesFolder = mockInstance("Services", {
     DataService = dataServiceModule,
     MapService = mapServiceModule,
     BotService = botServiceModule,
+    PowerupService = powerupServiceModule,
 })
 
 local helpersFolder = mockInstance("Helpers", {

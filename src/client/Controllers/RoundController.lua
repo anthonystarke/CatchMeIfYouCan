@@ -15,6 +15,7 @@ local Controllers = script.Parent
 local UIController = require(Controllers:WaitForChild("UIController"))
 local MovementController = require(Controllers:WaitForChild("MovementController"))
 local TagController = require(Controllers:WaitForChild("TagController"))
+local PowerupController = require(Controllers:WaitForChild("PowerupController"))
 
 local RoundController = {}
 
@@ -68,18 +69,23 @@ function RoundController:_onPhaseUpdate(phase)
         self._roundState = nil
         self:_clearChaseIndicator()
         TagController:StopDetection()
+        PowerupController:ClearPowerup()
         MovementController:ResetSpeed()
         UIController:HideRoleBanner()
         UIController:HideCountdown()
         UIController:UpdateTimer(0)
     elseif phase == Constants.PHASES.COUNTDOWN then
         TagController:StopDetection()
+        PowerupController:ClearPowerup()
     elseif phase == Constants.PHASES.PLAYING then
         UIController:HideCountdown()
+        PowerupController:StartPickupDetection()
     elseif phase == Constants.PHASES.RESULTS then
         TagController:StopDetection()
+        PowerupController:ClearPowerup()
     elseif phase == Constants.PHASES.INTERMISSION then
         UIController:HideCountdown()
+        PowerupController:ClearPowerup()
     end
 end
 

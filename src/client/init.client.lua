@@ -20,6 +20,7 @@ local SettingsController = require(Controllers:WaitForChild("SettingsController"
 local UIController = require(Controllers:WaitForChild("UIController"))
 local MovementController = require(Controllers:WaitForChild("MovementController"))
 local TagController = require(Controllers:WaitForChild("TagController"))
+local PowerupController = require(Controllers:WaitForChild("PowerupController"))
 local RoundController = require(Controllers:WaitForChild("RoundController"))
 
 -- Initialize controllers (order matters)
@@ -27,6 +28,7 @@ SettingsController:Init()
 UIController:Init()
 MovementController:Init()
 TagController:Init()
+PowerupController:Init()
 RoundController:Init()
 
 -- Start controllers
@@ -34,6 +36,7 @@ SettingsController:Start()
 UIController:Start()
 MovementController:Start()
 TagController:Start()
+PowerupController:Start()
 RoundController:Start()
 
 -- Currency update handling

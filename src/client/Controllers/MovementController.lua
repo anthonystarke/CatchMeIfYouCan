@@ -21,6 +21,7 @@ MovementController._jumpCount = 0
 MovementController._canDoubleJump = false
 MovementController._stateChangedConnection = nil
 MovementController._jumpRequestConnection = nil
+MovementController._jumpMultiplier = 1
 
 function MovementController:Init()
     print("[MovementController] Initializing...")
@@ -104,9 +105,9 @@ function MovementController:_performDoubleJump()
     local velocity = self._humanoidRootPart.AssemblyLinearVelocity
     self._humanoidRootPart.AssemblyLinearVelocity = Vector3.new(velocity.X, 0, velocity.Z)
 
-    -- Apply jump force
+    -- Apply jump force (scaled by jump multiplier for Mega Jump powerup)
     self._humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
-    self._humanoidRootPart.AssemblyLinearVelocity = self._humanoidRootPart.AssemblyLinearVelocity + Vector3.new(0, Constants.DEFAULT_JUMP_POWER, 0)
+    self._humanoidRootPart.AssemblyLinearVelocity = self._humanoidRootPart.AssemblyLinearVelocity + Vector3.new(0, Constants.DEFAULT_JUMP_POWER * self._jumpMultiplier, 0)
 end
 
 function MovementController:ApplyRoleSpeed(role)
@@ -149,10 +150,19 @@ end
 
 function MovementController:ResetSpeed()
     self._currentRole = nil
+    self._jumpMultiplier = 1
     if self._humanoid then
         self._humanoid.WalkSpeed = Constants.DEFAULT_WALK_SPEED
         self._humanoid.JumpPower = Constants.DEFAULT_JUMP_POWER
     end
+end
+
+function MovementController:ApplyJumpMultiplier(multiplier)
+    self._jumpMultiplier = multiplier
+end
+
+function MovementController:ResetJumpMultiplier()
+    self._jumpMultiplier = 1
 end
 
 return MovementController

@@ -28,6 +28,9 @@ UIController._countdownLabel = nil
 UIController._statusFrame = nil
 UIController._statusTitle = nil
 UIController._statusSubtitle = nil
+UIController._powerupContainer = nil
+UIController._powerupIcon = nil
+UIController._powerupLabel = nil
 
 function UIController:Init()
     print("[UIController] Initializing...")
@@ -57,6 +60,7 @@ function UIController:_createHUD()
     self:_createTagNotification()
     self:_createCountdownDisplay()
     self:_createStatusDisplay()
+    self:_createPowerupPrompt()
 end
 
 -- Helper: create a styled HUD container with rounded corners
@@ -219,6 +223,50 @@ function UIController:_createStatusDisplay()
     self._statusSubtitle.Size = UDim2.new(1, -20, 0, 40)
     self._statusSubtitle.Position = UDim2.new(0, 10, 0, 70)
     self._statusSubtitle.Parent = self._statusFrame
+end
+
+function UIController:_createPowerupPrompt()
+    self._powerupContainer = self:_createHUDContainer("PowerupContainer", UDim2.new(0, 200, 0, 50), UDim2.new(0.5, -100, 1, -70), 10, 0.2)
+    self._powerupContainer.Visible = false
+
+    self._powerupIcon = Instance.new("Frame")
+    self._powerupIcon.Name = "PowerupIcon"
+    self._powerupIcon.Size = UDim2.new(0, 36, 0, 36)
+    self._powerupIcon.Position = UDim2.new(0, 7, 0.5, -18)
+    self._powerupIcon.BackgroundColor3 = Color3.fromRGB(255, 255, 100)
+    self._powerupIcon.BorderSizePixel = 0
+    self._powerupIcon.Parent = self._powerupContainer
+
+    local iconCorner = Instance.new("UICorner")
+    iconCorner.CornerRadius = UDim.new(0, 18)
+    iconCorner.Parent = self._powerupIcon
+
+    self._powerupLabel = Instance.new("TextLabel")
+    self._powerupLabel.Name = "PowerupLabel"
+    self._powerupLabel.Text = ""
+    self._powerupLabel.TextSize = 16
+    self._powerupLabel.Font = Enum.Font.GothamBold
+    self._powerupLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+    self._powerupLabel.BackgroundTransparency = 1
+    self._powerupLabel.Size = UDim2.new(1, -55, 1, 0)
+    self._powerupLabel.Position = UDim2.new(0, 50, 0, 0)
+    self._powerupLabel.TextXAlignment = Enum.TextXAlignment.Left
+    self._powerupLabel.Parent = self._powerupContainer
+end
+
+function UIController:ShowPowerupPrompt(powerupType, text)
+    if not self._powerupContainer then return end
+
+    local color = GameConfig.PowerupColors[powerupType] or Color3.fromRGB(255, 255, 255)
+    self._powerupIcon.BackgroundColor3 = color
+    self._powerupLabel.Text = text or ""
+    self._powerupContainer.Visible = true
+end
+
+function UIController:HidePowerupPrompt()
+    if self._powerupContainer then
+        self._powerupContainer.Visible = false
+    end
 end
 
 -- Public methods called by RoundController

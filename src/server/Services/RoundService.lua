@@ -15,6 +15,7 @@ local Services = script.Parent
 local DataService = require(Services:WaitForChild("DataService"))
 local MapService = require(Services:WaitForChild("MapService"))
 local BotService = require(Services:WaitForChild("BotService"))
+local PowerupService = require(Services:WaitForChild("PowerupService"))
 
 local Helpers = script.Parent.Parent:WaitForChild("Helpers")
 local RemoteHelper = require(Helpers:WaitForChild("RemoteHelper"))
@@ -231,6 +232,7 @@ function RoundService:RemoveParticipant(player)
     -- Clean up per-player state
     self._tagCooldowns[player.UserId] = nil
     self._roundStats[player.UserId] = nil
+    PowerupService:RemovePlayer(player.UserId)
 end
 
 -- Called by BotService when a bot is close enough to tag
@@ -269,6 +271,7 @@ function RoundService:_roundLoop()
 
         -- Results phase
         self:_setPhase(Constants.PHASES.RESULTS)
+        PowerupService:OnRoundEnd()
         self:_processResults()
         BotService:StopAllAI()
         task.wait(Constants.RESULTS_DISPLAY_TIME)
@@ -378,6 +381,9 @@ function RoundService:_playRound()
             survivedSeconds = 0,
         }
     end
+
+    -- Start powerup spawning
+    PowerupService:OnRoundStart()
 
     -- Teleport runners to spawn points
     for _, runner in ipairs(runners) do
@@ -517,6 +523,13 @@ function RoundService:_handleTag(tagger, targetUserId)
     local distance = (taggerRoot.Position - targetRoot.Position).Magnitude
     -- Bots don't need network tolerance, but keep it consistent
     if distance > Constants.TAG_RANGE * Constants.TAG_RANGE_TOLERANCE then
+        return
+    end
+
+    -- Check if target has a Shield powerup
+    if PowerupService:HasShield(targetUserId) then
+        PowerupService:ConsumeShield(targetUserId)
+        self._tagCooldowns[tagger.UserId] = os.clock()
         return
     end
 

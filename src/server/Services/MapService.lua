@@ -40,6 +40,14 @@ local MAP_DEFINITIONS = {
             { pos = Vector3.new(-30, 3, 20), size = Vector3.new(8, 6, 8), color = Color3.fromRGB(255, 200, 80) },
             { pos = Vector3.new(30, 3, 15), size = Vector3.new(10, 6, 6), color = Color3.fromRGB(200, 100, 255) },
         },
+        powerupPads = {
+            Vector3.new(-15, 0.5, 10),
+            Vector3.new(15, 0.5, -10),
+            Vector3.new(10, 0.5, 30),
+            Vector3.new(-25, 0.5, -20),
+            Vector3.new(35, 0.5, 0),
+            Vector3.new(-10, 0.5, -30),
+        },
     },
 }
 
@@ -138,6 +146,26 @@ function MapService:_buildMap(definition)
         part.Parent = mapFolder
     end
 
+    -- Powerup pads
+    local powerupPadsFolder = Instance.new("Folder")
+    powerupPadsFolder.Name = "PowerupPads"
+    powerupPadsFolder.Parent = mapFolder
+
+    if definition.powerupPads then
+        for i, pos in ipairs(definition.powerupPads) do
+            local pad = Instance.new("Part")
+            pad.Name = "PowerupPad_" .. i
+            pad.Size = Vector3.new(4, 0.5, 4)
+            pad.Position = pos
+            pad.Anchored = true
+            pad.CanCollide = false
+            pad.Material = Enum.Material.Neon
+            pad.Color = Color3.fromRGB(200, 200, 200)
+            pad.Transparency = 0.3
+            pad.Parent = powerupPadsFolder
+        end
+    end
+
     -- Spawn markers (invisible)
     local spawnsFolder = Instance.new("Folder")
     spawnsFolder.Name = "Spawns"
@@ -232,6 +260,7 @@ function MapService:_buildMap(definition)
         Model = mapFolder,
         Definition = definition,
         SpawnsFolder = spawnsFolder,
+        PowerupPadsFolder = powerupPadsFolder,
     }
 end
 
@@ -283,6 +312,22 @@ end
 
 function MapService:TeleportToLobby(player)
     return self:_teleportToSpawn(player, self:_getSpawnsByPattern("^LobbySpawn_"))
+end
+
+function MapService:GetPowerupPadPositions()
+    local map = self:GetOrCreateMap()
+    if not map or not map.Definition.powerupPads then
+        return {}
+    end
+    return map.Definition.powerupPads
+end
+
+function MapService:GetMapBounds()
+    local map = self:GetOrCreateMap()
+    if not map then
+        return 50 -- fallback
+    end
+    return map.Definition.size / 2
 end
 
 function MapService:CleanupRound()
