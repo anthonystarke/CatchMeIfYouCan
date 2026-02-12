@@ -83,6 +83,12 @@ function MapService:_createOrGetMap(mapId)
 end
 
 function MapService:_buildMap(definition)
+    -- Remove any existing map folder (e.g. saved in place file from a previous session)
+    local existing = Workspace:FindFirstChild(definition.mapId)
+    if existing then
+        existing:Destroy()
+    end
+
     local mapFolder = Instance.new("Folder")
     mapFolder.Name = definition.mapId
     mapFolder.Parent = Workspace
