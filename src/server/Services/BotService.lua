@@ -15,6 +15,7 @@ local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Constants = require(Shared:WaitForChild("Config"):WaitForChild("Constants"))
 local MapService = require(Services:WaitForChild("MapService"))
 local PowerupService = require(Services:WaitForChild("PowerupService"))
+local BotStateMachine = require(Services:WaitForChild("BotStateMachine"))
 
 local BotService = {}
 
@@ -199,8 +200,7 @@ function BotService:SpawnBot()
         IsMinimalRig = isMinimalRig,
         Personality = personality,
         PersonalityStats = personalityStats,
-        TaggerState = nil, -- Initialized fresh each round via StartAI
-        RunnerState = nil,
+        _stateMachine = nil, -- Created fresh each round via StartAI
     }
 
     table.insert(self._bots, bot)
@@ -622,38 +622,13 @@ function BotService:StartAI(bot, role, roundState)
         end
     end
 
-    -- Reset AI state for new round
-    bot.TaggerState = {
-        committed_target = nil,
-        committed_since = 0,
-        reaction_ready_at = 0,
-        wander_target = nil,
-        wander_started = 0,
-        last_position = nil,
-        stuck_since = 0,
-        recovery_attempts = 0,
-        jump_ready_at = 0,
-    }
-    bot.RunnerState = {
-        wander_target = nil,
-        wander_started = 0,
-        reaction_ready_at = 0,
-        last_threat = nil,
-        last_threat_dist = math.huge,
-        last_position = nil,
-        stuck_since = 0,
-        recovery_attempts = 0,
-        jump_ready_at = 0,
-    }
+    -- Create fresh state machine for this round
+    bot._stateMachine = BotStateMachine.create()
 
     print("[BotService] Starting AI for", bot.Name, "as", role, "(" .. bot.Personality .. ")")
     self._aiThreads[bot.UserId] = task.spawn(function()
         local success, err = pcall(function()
-            if role == Constants.ROLES.TAGGER then
-                self:_taggerAI(bot, roundState)
-            else
-                self:_runnerAI(bot, roundState)
-            end
+            self:_aiLoop(bot, role, roundState)
         end)
         if not success then
             warn("[BotService] AI error for", bot.Name, ":", err)
@@ -759,214 +734,112 @@ function BotService:_checkNearbyPowerups(bot, botRoot)
     end
 end
 
-function BotService:_taggerAI(bot, roundState)
+function BotService:_aiLoop(bot, role, roundState)
     local humanoid = bot.Character and bot.Character:FindFirstChild("Humanoid")
     if not humanoid then
-        warn("[BotService] No humanoid for tagger", bot.Name)
+        warn("[BotService] No humanoid for", role, bot.Name)
         return
     end
 
     local stats = bot.PersonalityStats
-    humanoid.WalkSpeed = (Constants.DEFAULT_WALK_SPEED + Constants.TAGGER_SPEED_BOOST) * stats.speed_mult
+    local sm = bot._stateMachine
 
-    while true do
-        if not bot.Character or not bot.Character.Parent then
-            break
-        end
-
-        local botRoot = bot.Character:FindFirstChild("HumanoidRootPart")
-        if not botRoot then
-            break
-        end
-
-        local now = os.clock()
-        local state = bot.TaggerState
-
-        -- Stuck detection: recover if bot hasn't moved
-        self:_checkAndRecoverStuck(bot, state, botRoot)
-
-        -- Opportunistic powerup pickup
-        self:_checkNearbyPowerups(bot, botRoot)
-
-        -- Reassess targets on reaction timer
-        if now >= state.reaction_ready_at then
-            local nearestTarget = nil
-            local nearestDist = math.huge
-
-            if roundState and roundState.Runners then
-                for _, runner in ipairs(roundState.Runners) do
-                    if not roundState.TaggedPlayers[runner.UserId] then
-                        local targetChar = runner.Character
-                        if targetChar then
-                            local targetRoot = targetChar:FindFirstChild("HumanoidRootPart")
-                            if targetRoot then
-                                local dist = (targetRoot.Position - botRoot.Position).Magnitude
-                                if dist < nearestDist then
-                                    nearestDist = dist
-                                    nearestTarget = targetRoot
-                                end
-                            end
-                        end
-                    end
-                end
-            end
-
-            -- Commit to target: only switch if no current target, current tagged,
-            -- or commitment time expired
-            local shouldSwitch = not state.committed_target
-                or not state.committed_target.Parent
-                or (now - state.committed_since) > stats.target_commit_secs
-
-            if nearestTarget and shouldSwitch then
-                state.committed_target = nearestTarget
-                state.committed_since = now
-            elseif not nearestTarget then
-                state.committed_target = nil
-            end
-
-            state.reaction_ready_at = now + Constants.BOT_REACTION_DELAY_TAGGER * stats.reaction_delay_mult
-        end
-
-        -- Act on committed target or wander
-        if state.committed_target and state.committed_target.Parent then
-            local targetPos = state.committed_target.Position
-
-            -- Personality affects chase precision: faster bots are more direct
-            local offsetScale = 4 / math.max(stats.speed_mult, 0.5)
-            local offset = Vector3.new(
-                (math.random() - 0.5) * offsetScale,
-                0,
-                (math.random() - 0.5) * offsetScale
-            )
-
-            self:_playBotAnimation(bot, "run")
-            self:_moveBot(bot, targetPos + offset)
-
-            -- Jump when close to target or obstacle ahead
-            local dist = (state.committed_target.Position - botRoot.Position).Magnitude
-            self:_tryBotJump(bot, state, botRoot, humanoid, targetPos, dist)
-
-            -- Tag check
-            if dist <= Constants.TAG_RANGE and self._roundService then
-                self._roundService:BotTag(bot, state.committed_target.Parent)
-            end
-        else
-            -- Wander with persistence
-            self:_playBotAnimation(bot, "walk")
-
-            if not state.wander_target or (now - state.wander_started) > stats.wander_persist_secs then
-                state.wander_target = self:_generateWanderTarget(botRoot.Position, 30)
-                state.wander_started = now
-            end
-
-            self:_moveBot(bot, state.wander_target)
-        end
-
-        task.wait(Constants.BOT_UPDATE_INTERVAL)
-    end
-end
-
-function BotService:_runnerAI(bot, roundState)
-    local humanoid = bot.Character and bot.Character:FindFirstChild("Humanoid")
-    if not humanoid then
-        warn("[BotService] No humanoid for runner", bot.Name)
-        return
+    -- Set initial walk speed based on role + personality
+    if role == Constants.ROLES.TAGGER then
+        humanoid.WalkSpeed = (Constants.DEFAULT_WALK_SPEED + Constants.TAGGER_SPEED_BOOST) * stats.speed_mult
+    else
+        humanoid.WalkSpeed = Constants.DEFAULT_WALK_SPEED * stats.speed_mult
     end
 
-    local stats = bot.PersonalityStats
-    humanoid.WalkSpeed = Constants.DEFAULT_WALK_SPEED * stats.speed_mult
+    -- Find nearest untagged runner (used by Tagger states)
+    local function findNearestRunner()
+        local nearestTarget = nil
+        local nearestDist = math.huge
+        local botRoot = bot.Character and bot.Character:FindFirstChild("HumanoidRootPart")
+        if not botRoot then return nil, math.huge end
 
-    while true do
-        if not bot.Character or not bot.Character.Parent then
-            break
-        end
-
-        local botRoot = bot.Character:FindFirstChild("HumanoidRootPart")
-        if not botRoot then
-            break
-        end
-
-        -- Tagged: stop moving
-        if roundState and roundState.TaggedPlayers[bot.UserId] then
-            self:_playBotAnimation(bot, "idle")
-            task.wait(Constants.BOT_UPDATE_INTERVAL)
-            continue
-        end
-
-        local now = os.clock()
-        local state = bot.RunnerState
-
-        -- Stuck detection: recover if bot hasn't moved
-        self:_checkAndRecoverStuck(bot, state, botRoot)
-
-        -- Opportunistic powerup pickup
-        self:_checkNearbyPowerups(bot, botRoot)
-
-        -- Threat assessment on reaction timer
-        if now >= state.reaction_ready_at then
-            local nearestTagger = nil
-            local nearestDist = math.huge
-
-            if roundState and roundState.Taggers then
-                for _, tagger in ipairs(roundState.Taggers) do
-                    local taggerChar = tagger.Character
-                    if taggerChar then
-                        local taggerRoot = taggerChar:FindFirstChild("HumanoidRootPart")
-                        if taggerRoot then
-                            local dist = (taggerRoot.Position - botRoot.Position).Magnitude
+        if roundState and roundState.Runners then
+            for _, runner in ipairs(roundState.Runners) do
+                if not roundState.TaggedPlayers[runner.UserId] then
+                    local targetChar = runner.Character
+                    if targetChar then
+                        local targetRoot = targetChar:FindFirstChild("HumanoidRootPart")
+                        if targetRoot then
+                            local dist = (targetRoot.Position - botRoot.Position).Magnitude
                             if dist < nearestDist then
                                 nearestDist = dist
-                                nearestTagger = taggerRoot
+                                nearestTarget = targetRoot
                             end
                         end
                     end
                 end
             end
-
-            state.last_threat = nearestTagger
-            state.last_threat_dist = nearestDist
-
-            state.reaction_ready_at = now + Constants.BOT_REACTION_DELAY_RUNNER * stats.reaction_delay_mult
         end
+        return nearestTarget, nearestDist
+    end
 
-        -- Personality-adjusted flee distance
-        local fleeThreshold = Constants.BOT_FLEE_DISTANCE * stats.flee_distance_mult
+    -- Find nearest tagger (used by Runner states)
+    local function findNearestTagger()
+        local nearestTagger = nil
+        local nearestDist = math.huge
+        local botRoot = bot.Character and bot.Character:FindFirstChild("HumanoidRootPart")
+        if not botRoot then return nil, math.huge end
 
-        if state.last_threat and state.last_threat.Parent and state.last_threat_dist < fleeThreshold then
-            -- Flee: run directly away from tagger
-            state.wander_target = nil
-            self:_playBotAnimation(bot, "run")
-
-            local fleeDir = (botRoot.Position - state.last_threat.Position)
-            fleeDir = Vector3.new(fleeDir.X, 0, fleeDir.Z)
-            if fleeDir.Magnitude > 0.1 then
-                fleeDir = fleeDir.Unit
-            else
-                fleeDir = Vector3.new(math.random() - 0.5, 0, math.random() - 0.5).Unit
+        if roundState and roundState.Taggers then
+            for _, tagger in ipairs(roundState.Taggers) do
+                local taggerChar = tagger.Character
+                if taggerChar then
+                    local taggerRoot = taggerChar:FindFirstChild("HumanoidRootPart")
+                    if taggerRoot then
+                        local dist = (taggerRoot.Position - botRoot.Position).Magnitude
+                        if dist < nearestDist then
+                            nearestDist = dist
+                            nearestTagger = taggerRoot
+                        end
+                    end
+                end
             end
-
-            local randomOffset = Vector3.new(
-                (math.random() - 0.5) * Constants.BOT_RANDOM_OFFSET,
-                0,
-                (math.random() - 0.5) * Constants.BOT_RANDOM_OFFSET
-            )
-            local fleeTarget = self:_clampToMapBounds(botRoot.Position + fleeDir * 20 + randomOffset)
-
-            self:_moveBot(bot, fleeTarget)
-
-            -- Jump when threat is close or obstacle ahead while fleeing
-            self:_tryBotJump(bot, state, botRoot, humanoid, fleeTarget, state.last_threat_dist)
-        else
-            -- Wander with persistence
-            self:_playBotAnimation(bot, "walk")
-
-            if not state.wander_target or (now - state.wander_started) > stats.wander_persist_secs then
-                state.wander_target = self:_generateWanderTarget(botRoot.Position, 20)
-                state.wander_started = now
-            end
-
-            self:_moveBot(bot, state.wander_target)
         end
+        return nearestTagger, nearestDist
+    end
+
+    while bot.Character and bot.Character.Parent do
+        local botRoot = bot.Character:FindFirstChild("HumanoidRootPart")
+        if not botRoot then break end
+
+        -- Cross-state actions (always run regardless of state)
+        self:_checkAndRecoverStuck(bot, sm, botRoot)
+        self:_checkNearbyPowerups(bot, botRoot)
+
+        -- Build context table for state handlers
+        local ctx = {
+            bot = bot,
+            botRoot = botRoot,
+            humanoid = humanoid,
+            stats = stats,
+            roundState = roundState,
+            roundService = self._roundService,
+            findNearestRunner = findNearestRunner,
+            findNearestTagger = findNearestTagger,
+            moveBot = function(targetPos)
+                self:_moveBot(bot, targetPos)
+            end,
+            playAnim = function(animName)
+                self:_playBotAnimation(bot, animName)
+            end,
+            tryJump = function(moveTarget, nearDist)
+                self:_tryBotJump(bot, sm, botRoot, humanoid, moveTarget, nearDist)
+            end,
+            clampBounds = function(pos)
+                return self:_clampToMapBounds(pos)
+            end,
+            generateWander = function(currentPos, range)
+                return self:_generateWanderTarget(currentPos, range)
+            end,
+        }
+
+        -- Tick the state machine
+        BotStateMachine.update(sm, role, ctx)
 
         task.wait(Constants.BOT_UPDATE_INTERVAL)
     end
