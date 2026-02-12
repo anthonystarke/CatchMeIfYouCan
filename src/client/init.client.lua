@@ -41,17 +41,15 @@ local Remotes = ReplicatedStorage:WaitForChild("Remotes")
 
 -- Listen for currency updates
 local currencyUpdateEvent = Remotes:WaitForChild("CurrencyUpdate")
-currencyUpdateEvent.OnClientEvent:Connect(function(coins, gems)
+currencyUpdateEvent.OnClientEvent:Connect(function(coins)
     UIController:UpdateCoins(coins)
-    UIController:UpdateGems(gems)
 end)
 
 -- Get initial currency
 task.defer(function()
     local getCurrencyRemote = Remotes:WaitForChild("GetCurrency")
-    local coins, gems = getCurrencyRemote:InvokeServer()
+    local coins = getCurrencyRemote:InvokeServer()
     UIController:UpdateCoins(coins)
-    UIController:UpdateGems(gems)
 end)
 
 print("[Client] Client ready!")

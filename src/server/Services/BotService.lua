@@ -198,21 +198,8 @@ function BotService:SpawnBot()
         IsMinimalRig = isMinimalRig,
         Personality = personality,
         PersonalityStats = personalityStats,
-        -- AI state (initialized fresh each round via StartAI)
-        TaggerState = {
-            committed_target = nil,
-            committed_since = 0,
-            reaction_ready_at = 0,
-            wander_target = nil,
-            wander_started = 0,
-        },
-        RunnerState = {
-            wander_target = nil,
-            wander_started = 0,
-            reaction_ready_at = 0,
-            last_threat = nil,
-            last_threat_dist = math.huge,
-        },
+        TaggerState = nil, -- Initialized fresh each round via StartAI
+        RunnerState = nil,
     }
 
     table.insert(self._bots, bot)

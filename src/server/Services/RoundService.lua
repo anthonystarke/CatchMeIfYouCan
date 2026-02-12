@@ -380,8 +380,8 @@ function RoundService:_playRound()
         end
     end
 
-    -- Tagger gets a 3-second head start delay, then teleports and gets speed boost
-    task.delay(3, function()
+    -- Tagger gets a head start delay, then teleports and gets speed boost
+    task.delay(Constants.TAGGER_SPAWN_DELAY, function()
         for _, tagger in ipairs(taggers) do
             MapService:TeleportPlayerToSpawn(tagger, Constants.ROLES.TAGGER)
             self:_setWalkSpeed(tagger, Constants.DEFAULT_WALK_SPEED + Constants.TAGGER_SPEED_BOOST)

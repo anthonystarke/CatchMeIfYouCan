@@ -41,29 +41,9 @@ function Utils.FormatTime(seconds)
     end
 end
 
--- Format time remaining (countdown)
-function Utils.FormatCountdown(targetTime)
-    local remaining = targetTime - os.time()
-    if remaining <= 0 then
-        return "Ready!"
-    end
-    return Utils.FormatTime(remaining)
-end
-
--- Lerp (linear interpolation)
-function Utils.Lerp(a, b, t)
-    return a + (b - a) * t
-end
-
 -- Clamp value between min and max
 function Utils.Clamp(value, min, max)
     return math.max(min, math.min(max, value))
-end
-
--- Round to decimal places
-function Utils.Round(number, decimals)
-    local mult = 10 ^ (decimals or 0)
-    return math.floor(number * mult + 0.5) / mult
 end
 
 -- Shuffle array (Fisher-Yates)
@@ -98,19 +78,6 @@ function Utils.DeepCopy(original, _seen)
     end
 
     return copy
-end
-
--- Merge tables (second overwrites first)
-function Utils.Merge(t1, t2)
-    local result = Utils.DeepCopy(t1)
-    for key, value in pairs(t2) do
-        if type(value) == "table" and type(result[key]) == "table" then
-            result[key] = Utils.Merge(result[key], value)
-        else
-            result[key] = value
-        end
-    end
-    return result
 end
 
 -- Find in array
@@ -227,15 +194,6 @@ function Utils.Unique(array)
     return result
 end
 
--- Reverse array (returns new array)
-function Utils.Reverse(array)
-    local result = {}
-    for i = #array, 1, -1 do
-        table.insert(result, array[i])
-    end
-    return result
-end
-
 -- Split array into two based on predicate
 function Utils.Partition(array, predicate)
     local passed = {}
@@ -248,30 +206,6 @@ function Utils.Partition(array, predicate)
         end
     end
     return passed, failed
-end
-
--- Pick a random option from a weighted table
-function Utils.PickWeightedRandom(weights, fallback)
-    local totalWeight = 0
-    for _, weight in pairs(weights) do
-        totalWeight = totalWeight + weight
-    end
-
-    if totalWeight <= 0 then
-        return fallback
-    end
-
-    local roll = math.random() * totalWeight
-    local cumulative = 0
-
-    for option, weight in pairs(weights) do
-        cumulative = cumulative + weight
-        if roll <= cumulative then
-            return option
-        end
-    end
-
-    return fallback
 end
 
 return Utils

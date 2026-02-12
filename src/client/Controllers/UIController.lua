@@ -16,7 +16,6 @@ local UIController = {}
 
 -- State
 UIController._coins = 0
-UIController._gems = 0
 UIController._screenGui = nil
 UIController._timerLabel = nil
 UIController._roleBanner = nil
@@ -315,10 +314,6 @@ function UIController:UpdateCoins(coins)
     if self._coinsLabel then
         self._coinsLabel.Text = "Coins: " .. Utils.FormatNumber(coins)
     end
-end
-
-function UIController:UpdateGems(gems)
-    self._gems = gems
 end
 
 function UIController:SetPhaseText(phase)

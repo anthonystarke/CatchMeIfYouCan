@@ -31,6 +31,7 @@ Constants.COUNTDOWN_TIME = 5
 Constants.ROUND_DURATION = 120
 Constants.RESULTS_DISPLAY_TIME = 8
 Constants.INTERMISSION_TIME = 10
+Constants.TAGGER_SPAWN_DELAY = 3 -- Head start for runners before taggers spawn
 
 -- Player counts
 Constants.MIN_PLAYERS = 2
@@ -39,6 +40,7 @@ Constants.TAGGERS_PER_ROUND = 3
 
 -- Movement
 Constants.DEFAULT_WALK_SPEED = 16
+Constants.DEFAULT_JUMP_POWER = 50
 Constants.TAGGER_SPEED_BOOST = 4
 Constants.RUNNER_SPEED_BOOST = 0
 
@@ -46,6 +48,7 @@ Constants.RUNNER_SPEED_BOOST = 0
 Constants.TAG_COOLDOWN = 1.5
 Constants.TAG_RANGE = 6
 Constants.TAG_RANGE_TOLERANCE = 1.5 -- Server-side multiplier for network latency
+Constants.TAG_DETECTION_INTERVAL = 0.1 -- Client-side proximity check frequency (seconds)
 Constants.FREEZE_DURATION = 3
 
 -- Scoring

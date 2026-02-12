@@ -106,7 +106,7 @@ function MovementController:_performDoubleJump()
 
     -- Apply jump force
     self._humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
-    self._humanoidRootPart.AssemblyLinearVelocity = self._humanoidRootPart.AssemblyLinearVelocity + Vector3.new(0, 50, 0)
+    self._humanoidRootPart.AssemblyLinearVelocity = self._humanoidRootPart.AssemblyLinearVelocity + Vector3.new(0, Constants.DEFAULT_JUMP_POWER, 0)
 end
 
 function MovementController:ApplyRoleSpeed(role)
@@ -142,7 +142,7 @@ function MovementController:FreezeControls(duration)
             else
                 frozenHumanoid.WalkSpeed = Constants.DEFAULT_WALK_SPEED
             end
-            frozenHumanoid.JumpPower = 50
+            frozenHumanoid.JumpPower = Constants.DEFAULT_JUMP_POWER
         end
     end)
 end
@@ -151,7 +151,7 @@ function MovementController:ResetSpeed()
     self._currentRole = nil
     if self._humanoid then
         self._humanoid.WalkSpeed = Constants.DEFAULT_WALK_SPEED
-        self._humanoid.JumpPower = 50
+        self._humanoid.JumpPower = Constants.DEFAULT_JUMP_POWER
     end
 end
 

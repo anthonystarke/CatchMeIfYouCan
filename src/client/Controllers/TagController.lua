@@ -78,7 +78,7 @@ function TagController:_detectionLoop()
             end
         end
 
-        task.wait(0.1)
+        task.wait(Constants.TAG_DETECTION_INTERVAL)
     end
 
     self._detectionThread = nil
