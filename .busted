@@ -5,7 +5,7 @@ return {
         pattern = "_spec",
 
         -- Directories to search for tests
-        ROOT = { "tests/shared" },
+        ROOT = { "tests/shared", "tests/server" },
 
         -- Helper file to run before tests (sets up mocks and paths)
         helper = "tests/init.lua",
@@ -29,10 +29,19 @@ return {
         verbose = false,
     },
 
+    -- Server tests configuration
+    server = {
+        pattern = "_spec",
+        ROOT = { "tests/server" },
+        helper = "tests/init.lua",
+        output = "utfTerminal",
+        verbose = true,
+    },
+
     -- CI configuration (for continuous integration)
     ci = {
         pattern = "_spec",
-        ROOT = { "tests/shared" },
+        ROOT = { "tests/shared", "tests/server" },
         helper = "tests/init.lua",
         output = "TAP",
         verbose = true,

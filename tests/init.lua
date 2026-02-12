@@ -33,7 +33,10 @@ function TestBootstrap.setupPaths()
         projectRoot .. "/src/shared/Utils/?.lua",
         projectRoot .. "/src/shared/Helpers/?.lua",
         projectRoot .. "/src/shared/Types/?.lua",
-        -- Server helper paths (for testing server helpers)
+        -- Server paths (for testing server services and helpers)
+        projectRoot .. "/src/server/?.lua",
+        projectRoot .. "/src/server/?/init.lua",
+        projectRoot .. "/src/server/Services/?.lua",
         projectRoot .. "/src/server/Helpers/?.lua",
         -- Keep existing paths
         package.path,

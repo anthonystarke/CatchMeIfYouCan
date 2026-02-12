@@ -69,6 +69,7 @@ function Vector3.new(x, y, z)
     self.X = x or 0
     self.Y = y or 0
     self.Z = z or 0
+    self.Magnitude = math.sqrt(self.X * self.X + self.Y * self.Y + self.Z * self.Z)
     return self
 end
 

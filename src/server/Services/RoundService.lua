@@ -203,6 +203,36 @@ function RoundService:_findParticipant(userId)
     return nil
 end
 
+-- Remove a disconnected player from round state
+function RoundService:RemoveParticipant(player)
+    if not self._roundState then
+        return
+    end
+
+    -- Remove from Taggers
+    for i, tagger in ipairs(self._roundState.Taggers) do
+        if tagger.UserId == player.UserId then
+            table.remove(self._roundState.Taggers, i)
+            print("[RoundService] Removed tagger from round:", player.Name)
+            break
+        end
+    end
+
+    -- Remove from Runners and mark as tagged (they're gone)
+    for i, runner in ipairs(self._roundState.Runners) do
+        if runner.UserId == player.UserId then
+            table.remove(self._roundState.Runners, i)
+            self._roundState.TaggedPlayers[player.UserId] = true
+            print("[RoundService] Removed runner from round:", player.Name)
+            break
+        end
+    end
+
+    -- Clean up per-player state
+    self._tagCooldowns[player.UserId] = nil
+    self._roundStats[player.UserId] = nil
+end
+
 -- Called by BotService when a bot is close enough to tag
 function RoundService:BotTag(taggerBot, targetCharacter)
     if not self._roundState or self._currentPhase ~= Constants.PHASES.PLAYING then
@@ -414,8 +444,8 @@ function RoundService:_playRound()
             roundState = self:_getClientRoundState(),
         })
 
-        -- Check if all runners are tagged
-        if self:_allRunnersTagged() then
+        -- Check if round should end early
+        if self:_allRunnersTagged() or self:_allTaggersGone() or #self._roundState.Runners == 0 then
             break
         end
     end
@@ -529,7 +559,7 @@ function RoundService:_freezePlayer(participant)
         humanoidRootPart.Anchored = true
     end
 
-    -- Unfreeze after FREEZE_DURATION
+    -- Unfreeze after FREEZE_DURATION and transition to spectator
     -- Minimal rig bots (IsMinimalRig) stay anchored since they use PivotTo movement
     task.delay(Constants.FREEZE_DURATION, function()
         if not participant.Character then
@@ -541,6 +571,14 @@ function RoundService:_freezePlayer(participant)
             if root then
                 root.Anchored = false
             end
+        end
+
+        -- Transition tagged player to spectator role (real players only)
+        if not isBot(participant) and self._currentPhase == Constants.PHASES.PLAYING then
+            self:_fireClient(participant, {
+                phase = Constants.PHASES.PLAYING,
+                role = Constants.ROLES.SPECTATOR,
+            })
         end
     end)
 end
@@ -561,7 +599,8 @@ function RoundService:_processResults()
         return
     end
 
-    local taggerWon = self:_allRunnersTagged()
+    local taggersGone = self:_allTaggersGone()
+    local taggerWon = self:_allRunnersTagged() and not taggersGone
     local scores = {}
 
     -- Calculate tagger scores
@@ -658,6 +697,14 @@ function RoundService:_allRunnersTagged()
     end
 
     return true
+end
+
+function RoundService:_allTaggersGone()
+    if not self._roundState then
+        return true
+    end
+
+    return #self._roundState.Taggers == 0
 end
 
 return RoundService

@@ -107,13 +107,20 @@ function RoundController:_onRoundStateUpdate(stateData)
         self._currentRole = stateData.role
         print("[RoundController] Assigned role:", stateData.role)
 
-        MovementController:ApplyRoleSpeed(stateData.role)
-        UIController:ShowRoleBanner(stateData.role)
-        UIController:HideCountdown()
+        if stateData.role == Constants.ROLES.SPECTATOR then
+            -- Spectator: stop tag detection, reset speed, show spectator banner
+            TagController:StopDetection()
+            MovementController:ResetSpeed()
+            UIController:ShowRoleBanner("Spectator")
+        else
+            MovementController:ApplyRoleSpeed(stateData.role)
+            UIController:ShowRoleBanner(stateData.role)
+            UIController:HideCountdown()
 
-        -- Start tag detection if tagger
-        if stateData.role == Constants.ROLES.TAGGER then
-            TagController:StartDetection(self)
+            -- Start tag detection if tagger
+            if stateData.role == Constants.ROLES.TAGGER then
+                TagController:StartDetection(self)
+            end
         end
     end
 

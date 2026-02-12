@@ -61,6 +61,7 @@ end
 -- Handle player leave
 local function onPlayerRemoving(player)
     print("[Server] Player leaving:", player.Name)
+    RoundService:RemoveParticipant(player)
 end
 
 -- Connect events
