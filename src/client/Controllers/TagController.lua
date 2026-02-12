@@ -64,14 +64,11 @@ function TagController:_detectionLoop()
 
             if roundState and roundState.Runners then
                 for _, runner in ipairs(roundState.Runners) do
-                    -- Skip already tagged runners
-                    if not roundState.TaggedPlayers[runner.UserId] then
-                        local runnerChar = runner.Character
-                        if runnerChar and runnerChar:FindFirstChild("HumanoidRootPart") then
-                            local dist = (runnerChar.HumanoidRootPart.Position - localPos).Magnitude
-                            if dist <= Constants.TAG_RANGE then
-                                self:_tryTag(runner.UserId)
-                            end
+                    local runnerChar = runner.Character
+                    if runnerChar and runnerChar:FindFirstChild("HumanoidRootPart") then
+                        local dist = (runnerChar.HumanoidRootPart.Position - localPos).Magnitude
+                        if dist <= Constants.TAG_RANGE then
+                            self:_tryTag(runner.UserId)
                         end
                     end
                 end

@@ -39,8 +39,8 @@ describe("Constants", function()
     end)
 
     describe("Round timing", function()
-        it("should have positive round duration", function()
-            assert.is_true(Constants.ROUND_DURATION > 0)
+        it("should have positive max tags per round", function()
+            assert.is_true(Constants.MAX_TAGS_PER_ROUND > 0)
         end)
 
         it("should require at least 2 players", function()

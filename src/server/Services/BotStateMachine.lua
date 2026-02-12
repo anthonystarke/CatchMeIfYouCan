@@ -4,7 +4,7 @@
 
     States per role:
         Tagger:  IDLE → WANDER ↔ CHASE
-        Runner:  IDLE → WANDER ↔ FLEE → TAGGED
+        Runner:  IDLE → WANDER ↔ FLEE
 
     Cross-cutting actions (handled outside state machine):
         Jump, Powerup Pickup, Stuck Recovery
@@ -25,9 +25,8 @@ local TRANSITIONS = {
     },
     Runner = {
         IDLE   = { "WANDER", "FLEE" },
-        WANDER = { "FLEE", "IDLE", "TAGGED" },
-        FLEE   = { "WANDER", "IDLE", "TAGGED" },
-        TAGGED = { "IDLE" },
+        WANDER = { "FLEE", "IDLE" },
+        FLEE   = { "WANDER", "IDLE" },
     },
 }
 
@@ -131,7 +130,7 @@ local function _taggerChase(sm, ctx)
 
     -- Reassess targets on reaction timer
     if now >= sm.reaction_ready_at then
-        local nearestTarget, _ = ctx.findNearestRunner()
+        local nearestTarget = ctx.findNearestRunner()
 
         -- Decide whether to switch targets
         local shouldSwitch = not sm.committed_target
@@ -191,12 +190,6 @@ local function _runnerWander(sm, ctx)
     local now = os.clock()
     local stats = ctx.stats
 
-    -- Check if tagged
-    if ctx.roundState and ctx.roundState.TaggedPlayers[ctx.bot.UserId] then
-        BotStateMachine.transition(sm, "Runner", "TAGGED")
-        return
-    end
-
     -- Threat assessment on reaction timer
     if now >= sm.reaction_ready_at then
         local nearestTagger, nearestDist = ctx.findNearestTagger()
@@ -227,12 +220,6 @@ end
 local function _runnerFlee(sm, ctx)
     local now = os.clock()
     local stats = ctx.stats
-
-    -- Check if tagged
-    if ctx.roundState and ctx.roundState.TaggedPlayers[ctx.bot.UserId] then
-        BotStateMachine.transition(sm, "Runner", "TAGGED")
-        return
-    end
 
     -- Update threat assessment on reaction timer
     if now >= sm.reaction_ready_at then
@@ -275,11 +262,6 @@ local function _runnerFlee(sm, ctx)
     ctx.tryJump(fleeTarget, sm.last_threat_dist)
 end
 
-local function _runnerTagged(sm, ctx)
-    ctx.playAnim("idle")
-    -- Stay frozen until round ends (AI loop will be stopped externally)
-end
-
 -- Handler dispatch tables
 local HANDLERS = {
     Tagger = {
@@ -291,7 +273,6 @@ local HANDLERS = {
         IDLE   = _runnerIdle,
         WANDER = _runnerWander,
         FLEE   = _runnerFlee,
-        TAGGED = _runnerTagged,
     },
 }
 

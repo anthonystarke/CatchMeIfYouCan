@@ -24,7 +24,7 @@ PowerupService._roundActive = false
 PowerupService._playerPowerups = {} -- [userId] = { type = string, active = bool }
 PowerupService._padStates = {} -- [padIndex] = { position = Vector3, powerupType = string?, model = Instance? }
 PowerupService._spawnThread = nil
-PowerupService._effectTimers = {} -- [userId] = thread (for expiring timed effects)
+PowerupService._effectTimers = {} -- [userId] = { thread = thread, character = Model }
 
 -- All available powerup types
 local POWERUP_TYPES = {
@@ -99,13 +99,13 @@ function PowerupService:OnRoundEnd()
         self._spawnThread = nil
     end
 
-    -- Restore player state and cancel all effect timers
-    for userId, timer in pairs(self._effectTimers) do
-        task.cancel(timer)
-        -- Restore any modified stats to defaults
-        local player = Players:GetPlayerByUserId(userId)
-        if player and player.Character then
-            local humanoid = player.Character:FindFirstChild("Humanoid")
+    -- Restore player/bot state and cancel all effect timers
+    for _, entry in pairs(self._effectTimers) do
+        task.cancel(entry.thread)
+        -- Restore any modified stats to defaults (works for both players and bots)
+        local character = entry.character
+        if character then
+            local humanoid = character:FindFirstChild("Humanoid")
             if humanoid then
                 humanoid.WalkSpeed = Constants.DEFAULT_WALK_SPEED
                 humanoid.JumpPower = Constants.DEFAULT_JUMP_POWER
@@ -175,7 +175,7 @@ end
 -- Clean up powerup state for a disconnected player
 function PowerupService:RemovePlayer(userId)
     if self._effectTimers[userId] then
-        task.cancel(self._effectTimers[userId])
+        task.cancel(self._effectTimers[userId].thread)
         self._effectTimers[userId] = nil
     end
     self._playerPowerups[userId] = nil
@@ -358,20 +358,24 @@ function PowerupService:_applySpeedBoost(player)
     humanoid.WalkSpeed = originalSpeed * Constants.POWERUP_SPEED_BOOST_MULT
 
     -- Expire after duration
-    self._effectTimers[player.UserId] = task.delay(Constants.POWERUP_SPEED_BOOST_DURATION, function()
-        self._effectTimers[player.UserId] = nil
-        if not player.Character then return end
-        local h = player.Character:FindFirstChild("Humanoid")
-        if h then
-            h.WalkSpeed = originalSpeed
-        end
+    local character = player.Character
+    self._effectTimers[player.UserId] = {
+        character = character,
+        thread = task.delay(Constants.POWERUP_SPEED_BOOST_DURATION, function()
+            self._effectTimers[player.UserId] = nil
+            if not character or not character.Parent then return end
+            local h = character:FindFirstChild("Humanoid")
+            if h then
+                h.WalkSpeed = originalSpeed
+            end
 
-        self._stateUpdateEvent:FireAllClients({
-            userId = player.UserId,
-            powerupType = Constants.POWERUP_TYPES.SPEED_BOOST,
-            action = "expired",
-        })
-    end)
+            self._stateUpdateEvent:FireAllClients({
+                userId = player.UserId,
+                powerupType = Constants.POWERUP_TYPES.SPEED_BOOST,
+                action = "expired",
+            })
+        end),
+    }
 end
 
 function PowerupService:_applyMegaJump(player)
@@ -382,20 +386,24 @@ function PowerupService:_applyMegaJump(player)
     humanoid.JumpPower = Constants.DEFAULT_JUMP_POWER * Constants.POWERUP_MEGA_JUMP_MULT
 
     -- Expire after duration
-    self._effectTimers[player.UserId] = task.delay(Constants.POWERUP_MEGA_JUMP_DURATION, function()
-        self._effectTimers[player.UserId] = nil
-        if not player.Character then return end
-        local h = player.Character:FindFirstChild("Humanoid")
-        if h then
-            h.JumpPower = Constants.DEFAULT_JUMP_POWER
-        end
+    local character = player.Character
+    self._effectTimers[player.UserId] = {
+        character = character,
+        thread = task.delay(Constants.POWERUP_MEGA_JUMP_DURATION, function()
+            self._effectTimers[player.UserId] = nil
+            if not character or not character.Parent then return end
+            local h = character:FindFirstChild("Humanoid")
+            if h then
+                h.JumpPower = Constants.DEFAULT_JUMP_POWER
+            end
 
-        self._stateUpdateEvent:FireAllClients({
-            userId = player.UserId,
-            powerupType = Constants.POWERUP_TYPES.MEGA_JUMP,
-            action = "expired",
-        })
-    end)
+            self._stateUpdateEvent:FireAllClients({
+                userId = player.UserId,
+                powerupType = Constants.POWERUP_TYPES.MEGA_JUMP,
+                action = "expired",
+            })
+        end),
+    }
 end
 
 function PowerupService:_applyTeleport(player)

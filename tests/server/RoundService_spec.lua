@@ -1,6 +1,7 @@
 --[[
     RoundService Tests
     Tests for round lifecycle, tag handling, and participant management
+    Hot Potato mode: 1 tagger, role swaps on tag, tag-count-based rounds
 ]]
 
 -- Save original require before any patching
@@ -77,6 +78,7 @@ local BotServiceStub = {
     StartAI = function() end,
     StopAI = function() end,
     StopAllAI = function() end,
+    SwapRole = function() end,
 }
 
 local PowerupServiceStub = {
@@ -203,7 +205,6 @@ describe("RoundService", function()
         -- Reset RoundService state before each test
         RoundService._currentPhase = Constants.PHASES.LOBBY
         RoundService._roundState = nil
-        RoundService._roundTimer = 0
         RoundService._tagCooldowns = {}
         RoundService._roundStats = {}
 
@@ -221,61 +222,57 @@ describe("RoundService", function()
         end
     end)
 
-    -- Helper: set up a standard round with 1 tagger and 2 runners
+    -- Helper: set up a standard round with 1 tagger and runners (hot potato mode)
     local function setupRound(tagger, runners)
         RoundService._currentPhase = Constants.PHASES.PLAYING
         RoundService._roundState = {
             Taggers = { tagger },
             Runners = runners,
-            TaggedPlayers = {},
+            tagCount = 0,
+            immuneUntil = {},
             RoundStartTime = os.time(),
-            RoundEndTime = os.time() + Constants.ROUND_DURATION,
         }
         RoundService._roundStats = {}
         RoundService._tagCooldowns = {}
-        for _, p in ipairs({ tagger }) do
-            RoundService._roundStats[p.UserId] = { tagsPerformed = 0, survivedSeconds = 0 }
-        end
+        RoundService._roundStats[tagger.UserId] = { tagsPerformed = 0, timeAsRunner = 0 }
         for _, r in ipairs(runners) do
-            RoundService._roundStats[r.UserId] = { tagsPerformed = 0, survivedSeconds = 0 }
+            RoundService._roundStats[r.UserId] = { tagsPerformed = 0, timeAsRunner = 0 }
         end
     end
 
-    describe("_allRunnersTagged", function()
-        it("returns false with untagged runners", function()
+    describe("_maxTagsReached", function()
+        it("returns false when under tag limit", function()
             local tagger = createTestPlayer(1, "Tagger")
-            local runner1 = createTestPlayer(2, "Runner1")
-            local runner2 = createTestPlayer(3, "Runner2")
-            setupRound(tagger, { runner1, runner2 })
+            local runner = createTestPlayer(2, "Runner")
+            setupRound(tagger, { runner })
 
-            assert.is_false(RoundService:_allRunnersTagged())
+            RoundService._roundState.tagCount = 3
+
+            assert.is_false(RoundService:_maxTagsReached())
         end)
 
-        it("returns false with some runners tagged", function()
+        it("returns true when at tag limit", function()
             local tagger = createTestPlayer(1, "Tagger")
-            local runner1 = createTestPlayer(2, "Runner1")
-            local runner2 = createTestPlayer(3, "Runner2")
-            setupRound(tagger, { runner1, runner2 })
+            local runner = createTestPlayer(2, "Runner")
+            setupRound(tagger, { runner })
 
-            RoundService._roundState.TaggedPlayers[2] = true
+            RoundService._roundState.tagCount = Constants.MAX_TAGS_PER_ROUND
 
-            assert.is_false(RoundService:_allRunnersTagged())
+            assert.is_true(RoundService:_maxTagsReached())
         end)
 
-        it("returns true when all runners are tagged", function()
+        it("returns true when over tag limit", function()
             local tagger = createTestPlayer(1, "Tagger")
-            local runner1 = createTestPlayer(2, "Runner1")
-            local runner2 = createTestPlayer(3, "Runner2")
-            setupRound(tagger, { runner1, runner2 })
+            local runner = createTestPlayer(2, "Runner")
+            setupRound(tagger, { runner })
 
-            RoundService._roundState.TaggedPlayers[2] = true
-            RoundService._roundState.TaggedPlayers[3] = true
+            RoundService._roundState.tagCount = Constants.MAX_TAGS_PER_ROUND + 1
 
-            assert.is_true(RoundService:_allRunnersTagged())
+            assert.is_true(RoundService:_maxTagsReached())
         end)
 
         it("returns true when no round state", function()
-            assert.is_true(RoundService:_allRunnersTagged())
+            assert.is_true(RoundService:_maxTagsReached())
         end)
     end)
 
@@ -305,17 +302,7 @@ describe("RoundService", function()
     end)
 
     describe("RemoveParticipant", function()
-        it("removes player from Taggers list", function()
-            local tagger = createTestPlayer(1, "Tagger")
-            local runner = createTestPlayer(2, "Runner")
-            setupRound(tagger, { runner })
-
-            RoundService:RemoveParticipant(tagger)
-
-            assert.equal(0, #RoundService._roundState.Taggers)
-        end)
-
-        it("removes player from Runners list and marks as tagged", function()
+        it("removes player from Runners list", function()
             local tagger = createTestPlayer(1, "Tagger")
             local runner1 = createTestPlayer(2, "Runner1")
             local runner2 = createTestPlayer(3, "Runner2")
@@ -325,7 +312,22 @@ describe("RoundService", function()
 
             assert.equal(1, #RoundService._roundState.Runners)
             assert.equal(3, RoundService._roundState.Runners[1].UserId)
-            assert.is_true(RoundService._roundState.TaggedPlayers[2])
+        end)
+
+        it("promotes random runner when tagger disconnects", function()
+            local tagger = createTestPlayer(1, "Tagger")
+            local runner1 = createTestPlayer(2, "Runner1")
+            local runner2 = createTestPlayer(3, "Runner2")
+            setupRound(tagger, { runner1, runner2 })
+
+            RoundService:RemoveParticipant(tagger)
+
+            -- Should have promoted one runner to tagger
+            assert.equal(1, #RoundService._roundState.Taggers)
+            assert.equal(1, #RoundService._roundState.Runners)
+            -- The new tagger should be one of the original runners
+            local newTaggerId = RoundService._roundState.Taggers[1].UserId
+            assert.is_true(newTaggerId == 2 or newTaggerId == 3)
         end)
 
         it("cleans up roundStats and tagCooldowns", function()
@@ -351,15 +353,13 @@ describe("RoundService", function()
             assert.is_nil(RoundService._roundState)
         end)
 
-        it("causes _allTaggersGone to return true when last tagger removed", function()
+        it("results in empty taggers when last tagger removed and no runners", function()
             local tagger = createTestPlayer(1, "Tagger")
-            local runner = createTestPlayer(2, "Runner")
-            setupRound(tagger, { runner })
-
-            assert.is_false(RoundService:_allTaggersGone())
+            setupRound(tagger, {})
 
             RoundService:RemoveParticipant(tagger)
 
+            assert.equal(0, #RoundService._roundState.Taggers)
             assert.is_true(RoundService:_allTaggersGone())
         end)
     end)
@@ -376,7 +376,8 @@ describe("RoundService", function()
 
             RoundService:_handleTag(tagger, 2)
 
-            assert.is_nil(RoundService._roundState.TaggedPlayers[2])
+            -- tagCount should not have changed
+            assert.equal(0, RoundService._roundState.tagCount)
         end)
 
         it("rejects tag from non-tagger", function()
@@ -389,22 +390,7 @@ describe("RoundService", function()
             -- Runner1 tries to tag Runner2 (should fail, not a tagger)
             RoundService:_handleTag(runner1, 3)
 
-            assert.is_nil(RoundService._roundState.TaggedPlayers[3])
-        end)
-
-        it("rejects tag on already-tagged runner", function()
-            local tagger = createTestPlayer(1, "Tagger", 0, 0, 0)
-            local runner = createTestPlayer(2, "Runner", 1, 0, 0)
-            setupRound(tagger, { runner })
-            playersService._players[2] = runner
-
-            -- Pre-tag the runner
-            RoundService._roundState.TaggedPlayers[2] = true
-
-            RoundService:_handleTag(tagger, 2)
-
-            -- Stats should not have changed (no new tag performed)
-            assert.equal(0, RoundService._roundStats[1].tagsPerformed)
+            assert.equal(0, RoundService._roundState.tagCount)
         end)
 
         it("rejects tag when target is out of range", function()
@@ -416,10 +402,10 @@ describe("RoundService", function()
 
             RoundService:_handleTag(tagger, 2)
 
-            assert.is_nil(RoundService._roundState.TaggedPlayers[2])
+            assert.equal(0, RoundService._roundState.tagCount)
         end)
 
-        it("succeeds for valid tag within range", function()
+        it("succeeds for valid tag within range and swaps roles", function()
             -- Place tagger and runner close together (within TAG_RANGE * TAG_RANGE_TOLERANCE)
             local tagger = createTestPlayer(1, "Tagger", 0, 0, 0)
             local runner = createTestPlayer(2, "Runner", 3, 0, 0)
@@ -428,7 +414,14 @@ describe("RoundService", function()
 
             RoundService:_handleTag(tagger, 2)
 
-            assert.is_true(RoundService._roundState.TaggedPlayers[2])
+            -- Verify role swap: old tagger should be in Runners, target in Taggers
+            assert.equal(1, #RoundService._roundState.Taggers)
+            assert.equal(2, RoundService._roundState.Taggers[1].UserId)
+            assert.equal(1, #RoundService._roundState.Runners)
+            assert.equal(1, RoundService._roundState.Runners[1].UserId)
+            -- Tag count should increment
+            assert.equal(1, RoundService._roundState.tagCount)
+            -- Stats should update
             assert.equal(1, RoundService._roundStats[1].tagsPerformed)
         end)
 
@@ -440,20 +433,71 @@ describe("RoundService", function()
             playersService._players[2] = runner1
             playersService._players[3] = runner2
 
-            -- Tag first runner
+            -- Tag first runner (role swap: tagger→runner, runner1→tagger)
             TimeMock.setClock(100)
             RoundService:_handleTag(tagger, 2)
-            assert.is_true(RoundService._roundState.TaggedPlayers[2])
+            assert.equal(1, RoundService._roundState.tagCount)
 
-            -- Try to tag second runner immediately (within cooldown)
+            -- Now runner1 is the tagger (UserId 2), try to tag runner2 immediately (within cooldown)
+            -- But runner1 also has immunity, so this should fail regardless
             TimeMock.setClock(100.5)
-            RoundService:_handleTag(tagger, 3)
-            assert.is_nil(RoundService._roundState.TaggedPlayers[3])
+            RoundService:_handleTag(runner1, 3)
+            assert.equal(1, RoundService._roundState.tagCount) -- No new tag
+        end)
 
-            -- Tag second runner after cooldown expires
-            TimeMock.setClock(102)
-            RoundService:_handleTag(tagger, 3)
-            assert.is_true(RoundService._roundState.TaggedPlayers[3])
+        it("rejects tag during immunity", function()
+            local tagger = createTestPlayer(1, "Tagger", 0, 0, 0)
+            local runner1 = createTestPlayer(2, "Runner1", 3, 0, 0)
+            local runner2 = createTestPlayer(3, "Runner2", 3, 0, 0)
+            setupRound(tagger, { runner1, runner2 })
+            playersService._players[2] = runner1
+            playersService._players[3] = runner2
+
+            -- Set immunity on tagger (simulating they just became tagger via swap)
+            RoundService._roundState.immuneUntil[1] = 105 -- Immune until clock=105
+
+            TimeMock.setClock(103) -- Within immunity window
+            RoundService:_handleTag(tagger, 2)
+            assert.equal(0, RoundService._roundState.tagCount) -- Tag rejected
+
+            -- After immunity expires
+            TimeMock.setClock(106)
+            RoundService:_handleTag(tagger, 2)
+            assert.equal(1, RoundService._roundState.tagCount) -- Tag succeeds
+        end)
+
+        it("tag count increments with each successful tag", function()
+            local tagger = createTestPlayer(1, "Tagger", 0, 0, 0)
+            local runner1 = createTestPlayer(2, "Runner1", 3, 0, 0)
+            local runner2 = createTestPlayer(3, "Runner2", 3, 0, 0)
+            setupRound(tagger, { runner1, runner2 })
+            playersService._players[1] = tagger
+            playersService._players[2] = runner1
+            playersService._players[3] = runner2
+
+            -- First tag: tagger(1) tags runner1(2) → swap
+            TimeMock.setClock(100)
+            RoundService:_handleTag(tagger, 2)
+            assert.equal(1, RoundService._roundState.tagCount)
+
+            -- Now runner1(2) is tagger. Wait for cooldown + immunity to expire
+            TimeMock.setClock(110)
+            RoundService:_handleTag(runner1, 3)
+            assert.equal(2, RoundService._roundState.tagCount)
+        end)
+
+        it("sets immunity on new tagger after role swap", function()
+            local tagger = createTestPlayer(1, "Tagger", 0, 0, 0)
+            local runner = createTestPlayer(2, "Runner", 3, 0, 0)
+            setupRound(tagger, { runner })
+            playersService._players[2] = runner
+
+            TimeMock.setClock(100)
+            RoundService:_handleTag(tagger, 2)
+
+            -- New tagger (runner, UserId 2) should have immunity
+            assert.is_not_nil(RoundService._roundState.immuneUntil[2])
+            assert.equal(100 + Constants.TAG_SWAP_IMMUNITY, RoundService._roundState.immuneUntil[2])
         end)
     end)
 end)

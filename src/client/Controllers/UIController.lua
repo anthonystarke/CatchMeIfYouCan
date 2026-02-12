@@ -122,14 +122,14 @@ function UIController:_createRoleBanner()
 end
 
 function UIController:_createRunnersCounter()
-    local container = self:_createHUDContainer("RunnersContainer", UDim2.new(0, 160, 0, 36), UDim2.new(1, -170, 0, 10))
+    local container = self:_createHUDContainer("TagCountContainer", UDim2.new(0, 160, 0, 36), UDim2.new(1, -170, 0, 10))
 
     self._runnersLabel = Instance.new("TextLabel")
-    self._runnersLabel.Name = "RunnersLabel"
+    self._runnersLabel.Name = "TagCountLabel"
     self._runnersLabel.Text = ""
     self._runnersLabel.TextSize = 18
     self._runnersLabel.Font = Enum.Font.GothamBold
-    self._runnersLabel.TextColor3 = GameConfig.RoleColors.Runner
+    self._runnersLabel.TextColor3 = GameConfig.RoleColors.Tagger
     self._runnersLabel.BackgroundTransparency = 1
     self._runnersLabel.Size = UDim2.new(1, -10, 1, 0)
     self._runnersLabel.Position = UDim2.new(0, 5, 0, 0)
@@ -351,9 +351,9 @@ function UIController:UpdateTimer(seconds)
     end
 end
 
-function UIController:UpdateRunnersRemaining(remaining, total)
+function UIController:UpdateTagCount(current, max)
     if self._runnersLabel then
-        self._runnersLabel.Text = "Runners: " .. remaining .. "/" .. total
+        self._runnersLabel.Text = "Tags: " .. current .. "/" .. max
     end
 end
 
@@ -369,13 +369,9 @@ function UIController:SetPhaseText(phase)
         self._phaseLabel.Text = phase
     end
 
-    -- Show/hide timer based on phase
+    -- Hide timer (no round timer in hot potato mode)
     if self._timerLabel then
-        if phase == Constants.PHASES.PLAYING then
-            self._timerLabel.Parent.Visible = true
-        else
-            self._timerLabel.Parent.Visible = false
-        end
+        self._timerLabel.Parent.Visible = false
     end
 
     -- Show/hide runners counter
@@ -497,8 +493,7 @@ function UIController:NotifyTag(message)
     end)
 end
 
-function UIController:ShowResults(results, taggerWon)
-    -- Simple results display for MVP
+function UIController:ShowResults(results)
     local localPlayer = Players.LocalPlayer
     local myResult = results and results[localPlayer.UserId]
 

@@ -13,6 +13,7 @@ local ServerStorage = game:GetService("ServerStorage")
 local Services = script.Parent
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Constants = require(Shared:WaitForChild("Config"):WaitForChild("Constants"))
+local Utils = require(Shared:WaitForChild("Utils"))
 local MapService = require(Services:WaitForChild("MapService"))
 local PowerupService = require(Services:WaitForChild("PowerupService"))
 local BotStateMachine = require(Services:WaitForChild("BotStateMachine"))
@@ -110,15 +111,12 @@ function BotService:_loadAnimations()
     local animAsset = ServerStorage:FindFirstChild(animName)
 
     if animAsset then
-        -- Log contents so we can see what's inside
+        -- Log contents and search for Animation instances in a single pass
         print("[BotService] Inspecting", animName, "contents:")
         for _, desc in ipairs(animAsset:GetDescendants()) do
             print("  -", desc.Name, "(" .. desc.ClassName .. ")",
                 desc:IsA("Animation") and ("AnimationId: " .. desc.AnimationId) or "")
-        end
 
-        -- Search all descendants for Animation instances
-        for _, desc in ipairs(animAsset:GetDescendants()) do
             if desc:IsA("Animation") then
                 local name = desc.Name:lower()
                 if name:find("idle") and not self._animationIds.idle then
@@ -234,12 +232,7 @@ function BotService:RemoveBot(specificBot)
         bot.Character:Destroy()
     end
 
-    for i, b in ipairs(self._bots) do
-        if b.UserId == bot.UserId then
-            table.remove(self._bots, i)
-            break
-        end
-    end
+    Utils.RemoveByKey(self._bots, "UserId", bot.UserId)
 
     self._usedNames[bot.Name] = nil
     print("[BotService] Removed bot:", bot.Name)
@@ -636,6 +629,11 @@ function BotService:StartAI(bot, role, roundState)
     end)
 end
 
+function BotService:SwapRole(bot, newRole, roundState)
+    self:StopAI(bot)
+    self:StartAI(bot, newRole, roundState)
+end
+
 function BotService:StopAI(bot)
     if self._aiThreads[bot.UserId] then
         task.cancel(self._aiThreads[bot.UserId])
@@ -751,56 +749,37 @@ function BotService:_aiLoop(bot, role, roundState)
         humanoid.WalkSpeed = Constants.DEFAULT_WALK_SPEED * stats.speed_mult
     end
 
-    -- Find nearest untagged runner (used by Tagger states)
-    local function findNearestRunner()
-        local nearestTarget = nil
-        local nearestDist = math.huge
-        local botRoot = bot.Character and bot.Character:FindFirstChild("HumanoidRootPart")
-        if not botRoot then return nil, math.huge end
-
-        if roundState and roundState.Runners then
-            for _, runner in ipairs(roundState.Runners) do
-                if not roundState.TaggedPlayers[runner.UserId] then
-                    local targetChar = runner.Character
-                    if targetChar then
-                        local targetRoot = targetChar:FindFirstChild("HumanoidRootPart")
-                        if targetRoot then
-                            local dist = (targetRoot.Position - botRoot.Position).Magnitude
-                            if dist < nearestDist then
-                                nearestDist = dist
-                                nearestTarget = targetRoot
-                            end
-                        end
+    -- Find nearest participant by HumanoidRootPart distance
+    local function findNearestRootPart(participants, originPos)
+        local nearest, nearestDist = nil, math.huge
+        for _, p in ipairs(participants) do
+            local char = p.Character
+            if char then
+                local root = char:FindFirstChild("HumanoidRootPart")
+                if root then
+                    local dist = (root.Position - originPos).Magnitude
+                    if dist < nearestDist then
+                        nearestDist = dist
+                        nearest = root
                     end
                 end
             end
         end
-        return nearestTarget, nearestDist
+        return nearest, nearestDist
+    end
+
+    -- Find nearest untagged runner (used by Tagger states)
+    local function findNearestRunner()
+        local botRoot = bot.Character and bot.Character:FindFirstChild("HumanoidRootPart")
+        if not botRoot then return nil, math.huge end
+        return findNearestRootPart(roundState and roundState.Runners or {}, botRoot.Position)
     end
 
     -- Find nearest tagger (used by Runner states)
     local function findNearestTagger()
-        local nearestTagger = nil
-        local nearestDist = math.huge
         local botRoot = bot.Character and bot.Character:FindFirstChild("HumanoidRootPart")
         if not botRoot then return nil, math.huge end
-
-        if roundState and roundState.Taggers then
-            for _, tagger in ipairs(roundState.Taggers) do
-                local taggerChar = tagger.Character
-                if taggerChar then
-                    local taggerRoot = taggerChar:FindFirstChild("HumanoidRootPart")
-                    if taggerRoot then
-                        local dist = (taggerRoot.Position - botRoot.Position).Magnitude
-                        if dist < nearestDist then
-                            nearestDist = dist
-                            nearestTagger = taggerRoot
-                        end
-                    end
-                end
-            end
-        end
-        return nearestTagger, nearestDist
+        return findNearestRootPart(roundState and roundState.Taggers or {}, botRoot.Position)
     end
 
     while bot.Character and bot.Character.Parent do

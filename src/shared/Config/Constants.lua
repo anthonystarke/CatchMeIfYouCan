@@ -28,15 +28,14 @@ Constants.DEFAULT_GEMS = 10
 -- Round timing (seconds)
 Constants.LOBBY_WAIT_TIME = 5
 Constants.COUNTDOWN_TIME = 5
-Constants.ROUND_DURATION = 120
-Constants.RESULTS_DISPLAY_TIME = 8
-Constants.INTERMISSION_TIME = 10
+Constants.RESULTS_DISPLAY_TIME = 5
+Constants.INTERMISSION_TIME = 5
 Constants.TAGGER_SPAWN_DELAY = 3 -- Head start for runners before taggers spawn
 
 -- Player counts
 Constants.MIN_PLAYERS = 2
 Constants.MAX_PLAYERS = 12
-Constants.TAGGERS_PER_ROUND = 3
+Constants.TAGGERS_PER_ROUND = 1
 
 -- Movement
 Constants.DEFAULT_WALK_SPEED = 16
@@ -49,13 +48,12 @@ Constants.TAG_COOLDOWN = 1.5
 Constants.TAG_RANGE = 6
 Constants.TAG_RANGE_TOLERANCE = 1.5 -- Server-side multiplier for network latency
 Constants.TAG_DETECTION_INTERVAL = 0.1 -- Client-side proximity check frequency (seconds)
-Constants.FREEZE_DURATION = 3
+Constants.TAG_SWAP_IMMUNITY = 5 -- Seconds new tagger can't tag after role swap
+Constants.MAX_TAGS_PER_ROUND = 10 -- Round ends after this many tags
 
 -- Scoring
 Constants.POINTS_PER_TAG = 10
-Constants.POINTS_PER_SURVIVAL = 5
 Constants.POINTS_PER_SECOND_ALIVE = 1
-Constants.BONUS_LAST_RUNNER = 50
 Constants.COINS_PER_TAG = 5
 Constants.COINS_PER_WIN = 25
 Constants.COINS_PER_ROUND = 10

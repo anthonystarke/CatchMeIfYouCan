@@ -108,25 +108,20 @@ function RoundController:_onRoundStateUpdate(stateData)
         return
     end
 
-    -- Handle role assignment
+    -- Handle role assignment (includes role swaps during hot potato)
     if stateData.role then
         self._currentRole = stateData.role
         print("[RoundController] Assigned role:", stateData.role)
 
-        if stateData.role == Constants.ROLES.SPECTATOR then
-            -- Spectator: stop tag detection, reset speed, show spectator banner
-            TagController:StopDetection()
-            MovementController:ResetSpeed()
-            UIController:ShowRoleBanner("Spectator")
-        else
-            MovementController:ApplyRoleSpeed(stateData.role)
-            UIController:ShowRoleBanner(stateData.role)
-            UIController:HideCountdown()
+        MovementController:ApplyRoleSpeed(stateData.role)
+        UIController:ShowRoleBanner(stateData.role)
+        UIController:HideCountdown()
 
-            -- Start tag detection if tagger
-            if stateData.role == Constants.ROLES.TAGGER then
-                TagController:StartDetection(self)
-            end
+        -- Start/stop tag detection based on role
+        if stateData.role == Constants.ROLES.TAGGER then
+            TagController:StartDetection(self)
+        else
+            TagController:StopDetection()
         end
     end
 
@@ -134,21 +129,11 @@ function RoundController:_onRoundStateUpdate(stateData)
     if stateData.roundState then
         self._roundState = stateData.roundState
 
-        -- Update runners remaining count
-        local totalRunners = #stateData.roundState.Runners
-        local taggedCount = 0
-        for _ in pairs(stateData.roundState.TaggedPlayers) do
-            taggedCount = taggedCount + 1
-        end
-        UIController:UpdateRunnersRemaining(totalRunners - taggedCount, totalRunners)
+        -- Update tag count display
+        UIController:UpdateTagCount(stateData.roundState.tagCount or 0, stateData.roundState.maxTags or Constants.MAX_TAGS_PER_ROUND)
 
         -- Update chase indicator
         self:_updateChaseIndicator(stateData.roundState)
-    end
-
-    -- Handle timer updates
-    if stateData.timeRemaining then
-        UIController:UpdateTimer(stateData.timeRemaining)
     end
 
     -- Handle tag events
@@ -158,7 +143,7 @@ function RoundController:_onRoundStateUpdate(stateData)
 
     -- Handle results
     if stateData.phase == Constants.PHASES.RESULTS and stateData.results then
-        UIController:ShowResults(stateData.results, stateData.taggerWon)
+        UIController:ShowResults(stateData.results)
     end
 end
 
@@ -166,12 +151,13 @@ function RoundController:_onTagEvent(tagEvent)
     local localPlayer = Players.LocalPlayer
 
     if tagEvent.tagged == localPlayer.UserId then
-        print("[RoundController] You were tagged!")
-        UIController:NotifyTag("You were tagged!")
-        MovementController:FreezeControls(Constants.FREEZE_DURATION)
+        -- We got tagged — we're now the tagger!
+        print("[RoundController] You're It!")
+        UIController:NotifyTag("You're It!")
     elseif tagEvent.tagger == localPlayer.UserId then
-        print("[RoundController] You tagged someone!")
-        UIController:NotifyTag("Tag!")
+        -- We tagged someone — we're now a runner!
+        print("[RoundController] You escaped!")
+        UIController:NotifyTag("You escaped!")
     end
 end
 

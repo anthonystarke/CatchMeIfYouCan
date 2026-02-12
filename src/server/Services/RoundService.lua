@@ -25,7 +25,6 @@ local RoundService = {}
 -- Round state
 RoundService._currentPhase = Constants.PHASES.LOBBY
 RoundService._roundState = nil
-RoundService._roundTimer = 0
 RoundService._tagCooldowns = {}
 RoundService._roundStats = {}
 
@@ -77,7 +76,6 @@ function RoundService:GetRoundState()
     return {
         phase = self._currentPhase,
         roundState = self:_getClientRoundState(),
-        timeRemaining = self._roundTimer,
     }
 end
 
@@ -106,12 +104,24 @@ function RoundService:_getClientRoundState()
         table.insert(clientRunners, sanitizeParticipant(r))
     end
 
+    -- Find immune player (if any)
+    local immunePlayerId = nil
+    if self._roundState.immuneUntil then
+        for userId, expiry in pairs(self._roundState.immuneUntil) do
+            if os.clock() < expiry then
+                immunePlayerId = userId
+                break
+            end
+        end
+    end
+
     return {
         Taggers = clientTaggers,
         Runners = clientRunners,
-        TaggedPlayers = self._roundState.TaggedPlayers,
+        tagCount = self._roundState.tagCount or 0,
+        maxTags = Constants.MAX_TAGS_PER_ROUND,
+        immunePlayerId = immunePlayerId,
         RoundStartTime = self._roundState.RoundStartTime,
-        RoundEndTime = self._roundState.RoundEndTime,
         ChaseTargetId = self:_getChaseTargetId(),
     }
 end
@@ -126,19 +136,20 @@ function RoundService:_getChaseTargetId()
 
     for _, tagger in ipairs(self._roundState.Taggers) do
         -- Bot tagger: use committed target from AI state
-        if isBot(tagger) and tagger.TaggerState and tagger.TaggerState.committed_target then
-            local target = tagger.TaggerState.committed_target
+        if isBot(tagger) and tagger._stateMachine and tagger._stateMachine.committed_target then
+            local target = tagger._stateMachine.committed_target
             if target.Parent then
                 -- Find the runner UserId that owns this HumanoidRootPart
-                for _, runner in ipairs(self._roundState.Runners) do
-                    if runner.Character and runner.Character:FindFirstChild("HumanoidRootPart") == target then
-                        return runner.UserId
-                    end
+                local runner = Utils.Find(self._roundState.Runners, function(r)
+                    return r.Character and r.Character:FindFirstChild("HumanoidRootPart") == target
+                end)
+                if runner then
+                    return runner.UserId
                 end
             end
         end
 
-        -- Real player tagger: find nearest untagged runner
+        -- Real player tagger: find nearest runner
         if not isBot(tagger) then
             local taggerChar = tagger.Character
             if taggerChar then
@@ -147,16 +158,14 @@ function RoundService:_getChaseTargetId()
                     local nearestId = nil
                     local nearestDist = math.huge
                     for _, runner in ipairs(self._roundState.Runners) do
-                        if not self._roundState.TaggedPlayers[runner.UserId] then
-                            local runnerChar = runner.Character
-                            if runnerChar then
-                                local runnerRoot = runnerChar:FindFirstChild("HumanoidRootPart")
-                                if runnerRoot then
-                                    local dist = (runnerRoot.Position - taggerRoot.Position).Magnitude
-                                    if dist < nearestDist then
-                                        nearestDist = dist
-                                        nearestId = runner.UserId
-                                    end
+                        local runnerChar = runner.Character
+                        if runnerChar then
+                            local runnerRoot = runnerChar:FindFirstChild("HumanoidRootPart")
+                            if runnerRoot then
+                                local dist = (runnerRoot.Position - taggerRoot.Position).Magnitude
+                                if dist < nearestDist then
+                                    nearestDist = dist
+                                    nearestId = runner.UserId
                                 end
                             end
                         end
@@ -211,27 +220,50 @@ function RoundService:RemoveParticipant(player)
     end
 
     -- Remove from Taggers
-    for i, tagger in ipairs(self._roundState.Taggers) do
-        if tagger.UserId == player.UserId then
-            table.remove(self._roundState.Taggers, i)
-            print("[RoundService] Removed tagger from round:", player.Name)
-            break
-        end
+    local _, wasTheTagger = Utils.RemoveByKey(self._roundState.Taggers, "UserId", player.UserId)
+    if wasTheTagger then
+        print("[RoundService] Removed tagger from round:", player.Name)
     end
 
-    -- Remove from Runners and mark as tagged (they're gone)
-    for i, runner in ipairs(self._roundState.Runners) do
-        if runner.UserId == player.UserId then
-            table.remove(self._roundState.Runners, i)
-            self._roundState.TaggedPlayers[player.UserId] = true
-            print("[RoundService] Removed runner from round:", player.Name)
-            break
+    -- Remove from Runners
+    local _, wasRunner = Utils.RemoveByKey(self._roundState.Runners, "UserId", player.UserId)
+    if wasRunner then
+        print("[RoundService] Removed runner from round:", player.Name)
+    end
+
+    -- If the tagger disconnected, promote a random runner to tagger
+    if wasTheTagger and #self._roundState.Runners > 0 then
+        local idx = math.random(#self._roundState.Runners)
+        local newTagger = table.remove(self._roundState.Runners, idx)
+        table.insert(self._roundState.Taggers, newTagger)
+        self:_setWalkSpeed(newTagger, Constants.DEFAULT_WALK_SPEED + Constants.TAGGER_SPEED_BOOST)
+        print("[RoundService] Promoted", newTagger.Name, "to tagger (previous tagger disconnected)")
+
+        -- Restart bot AI if needed
+        if isBot(newTagger) then
+            BotService:SwapRole(newTagger, Constants.ROLES.TAGGER, self._roundState)
         end
+
+        -- Notify clients of the new tagger
+        self:_fireClient(newTagger, {
+            phase = Constants.PHASES.PLAYING,
+            role = Constants.ROLES.TAGGER,
+            roundState = self:_getClientRoundState(),
+        })
+
+        -- Broadcast updated round state to all
+        self._roundStateEvent:FireAllClients({
+            phase = Constants.PHASES.PLAYING,
+            roundState = self:_getClientRoundState(),
+        })
     end
 
     -- Clean up per-player state
     self._tagCooldowns[player.UserId] = nil
     self._roundStats[player.UserId] = nil
+    if self._roundState.immuneUntil then
+        self._roundState.immuneUntil[player.UserId] = nil
+    end
     PowerupService:RemovePlayer(player.UserId)
 end
 
@@ -242,13 +274,10 @@ function RoundService:BotTag(taggerBot, targetCharacter)
     end
 
     -- Find the target's UserId from their character
-    local targetUserId = nil
-    for _, runner in ipairs(self._roundState.Runners) do
-        if runner.Character == targetCharacter then
-            targetUserId = runner.UserId
-            break
-        end
-    end
+    local targetRunner = Utils.Find(self._roundState.Runners, function(runner)
+        return runner.Character == targetCharacter
+    end)
+    local targetUserId = targetRunner and targetRunner.UserId
 
     if targetUserId then
         self:_handleTag(taggerBot, targetUserId)
@@ -336,7 +365,6 @@ end
 
 function RoundService:_countdown()
     for i = Constants.COUNTDOWN_TIME, 1, -1 do
-        self._roundTimer = i
         self._roundStateEvent:FireAllClients({
             phase = Constants.PHASES.COUNTDOWN,
             countdown = i,
@@ -351,26 +379,22 @@ function RoundService:_playRound()
         return
     end
 
-    -- Shuffle and assign roles (prefer real players as tagger for better experience)
+    -- Shuffle and assign roles: 1 tagger, rest are runners
     local shuffled = Utils.Shuffle(participants)
-    local taggers = {}
+    local tagger = shuffled[1]
     local runners = {}
 
-    for i, participant in ipairs(shuffled) do
-        if i <= Constants.TAGGERS_PER_ROUND then
-            table.insert(taggers, participant)
-        else
-            table.insert(runners, participant)
-        end
+    for i = 2, #shuffled do
+        table.insert(runners, shuffled[i])
     end
 
-    -- Create round state
+    -- Create round state (hot potato model)
     self._roundState = {
-        Taggers = taggers,
+        Taggers = { tagger },
         Runners = runners,
-        TaggedPlayers = {},
+        tagCount = 0,
+        immuneUntil = {},
         RoundStartTime = os.time(),
-        RoundEndTime = os.time() + Constants.ROUND_DURATION,
     }
 
     -- Initialize per-participant round stats
@@ -378,7 +402,7 @@ function RoundService:_playRound()
     for _, participant in ipairs(participants) do
         self._roundStats[participant.UserId] = {
             tagsPerformed = 0,
-            survivedSeconds = 0,
+            timeAsRunner = 0,
         }
     end
 
@@ -393,16 +417,14 @@ function RoundService:_playRound()
 
     -- Notify real clients of role assignments (bots don't need UI)
     local clientRoundState = self:_getClientRoundState()
-    for _, participant in ipairs(taggers) do
-        self:_fireClient(participant, {
-            phase = Constants.PHASES.PLAYING,
-            role = Constants.ROLES.TAGGER,
-            roundState = clientRoundState,
-        })
-    end
+    self:_fireClient(tagger, {
+        phase = Constants.PHASES.PLAYING,
+        role = Constants.ROLES.TAGGER,
+        roundState = clientRoundState,
+    })
 
-    for _, participant in ipairs(runners) do
-        self:_fireClient(participant, {
+    for _, runner in ipairs(runners) do
+        self:_fireClient(runner, {
             phase = Constants.PHASES.PLAYING,
             role = Constants.ROLES.RUNNER,
             roundState = clientRoundState,
@@ -418,40 +440,37 @@ function RoundService:_playRound()
 
     -- Tagger gets a head start delay, then teleports and gets speed boost
     task.delay(Constants.TAGGER_SPAWN_DELAY, function()
-        for _, tagger in ipairs(taggers) do
-            MapService:TeleportPlayerToSpawn(tagger, Constants.ROLES.TAGGER)
-            self:_setWalkSpeed(tagger, Constants.DEFAULT_WALK_SPEED + Constants.TAGGER_SPEED_BOOST)
+        MapService:TeleportPlayerToSpawn(tagger, Constants.ROLES.TAGGER)
+        self:_setWalkSpeed(tagger, Constants.DEFAULT_WALK_SPEED + Constants.TAGGER_SPEED_BOOST)
 
-            -- Start bot AI for tagger bots
-            if isBot(tagger) then
-                BotService:StartAI(tagger, Constants.ROLES.TAGGER, self._roundState)
-            end
+        -- Start bot AI for tagger bot
+        if isBot(tagger) then
+            BotService:StartAI(tagger, Constants.ROLES.TAGGER, self._roundState)
         end
     end)
 
-    -- Run round timer
+    -- Main loop: runs until max tags reached (no timer)
     local elapsed = 0
-    while elapsed < Constants.ROUND_DURATION do
+    while self._roundState.tagCount < Constants.MAX_TAGS_PER_ROUND do
         task.wait(1)
         elapsed = elapsed + 1
-        self._roundTimer = Constants.ROUND_DURATION - elapsed
 
-        -- Track survival time for untagged runners
-        for _, runner in ipairs(runners) do
-            if not self._roundState.TaggedPlayers[runner.UserId] and self._roundStats[runner.UserId] then
-                self._roundStats[runner.UserId].survivedSeconds = elapsed
+        -- Track runner time for all current runners
+        for _, runner in ipairs(self._roundState.Runners) do
+            if self._roundStats[runner.UserId] then
+                self._roundStats[runner.UserId].timeAsRunner = self._roundStats[runner.UserId].timeAsRunner + 1
             end
         end
 
-        -- Broadcast timer update to real clients
+        -- Broadcast state update to real clients
         self._roundStateEvent:FireAllClients({
             phase = Constants.PHASES.PLAYING,
-            timeRemaining = self._roundTimer,
+            elapsed = elapsed,
             roundState = self:_getClientRoundState(),
         })
 
         -- Check if round should end early
-        if self:_allRunnersTagged() or self:_allTaggersGone() or #self._roundState.Runners == 0 then
+        if self:_maxTagsReached() or self:_allTaggersGone() or #self._roundState.Runners == 0 then
             break
         end
     end
@@ -467,15 +486,7 @@ function RoundService:_handleTag(tagger, targetUserId)
     end
 
     -- Verify tagger is actually a tagger
-    local isTagger = false
-    for _, t in ipairs(self._roundState.Taggers) do
-        if t.UserId == tagger.UserId then
-            isTagger = true
-            break
-        end
-    end
-
-    if not isTagger then
+    if not Utils.Contains(self._roundState.Taggers, "UserId", tagger.UserId) then
         return
     end
 
@@ -485,20 +496,13 @@ function RoundService:_handleTag(tagger, targetUserId)
         return
     end
 
-    -- Check if target is a valid runner and not already tagged
-    if self._roundState.TaggedPlayers[targetUserId] then
+    -- Check immunity (new tagger can't tag for TAG_SWAP_IMMUNITY seconds)
+    if self._roundState.immuneUntil[tagger.UserId] and now < self._roundState.immuneUntil[tagger.UserId] then
         return
     end
 
-    local isRunner = false
-    for _, r in ipairs(self._roundState.Runners) do
-        if r.UserId == targetUserId then
-            isRunner = true
-            break
-        end
-    end
-
-    if not isRunner then
+    -- Check if target is a valid runner
+    if not Utils.Contains(self._roundState.Runners, "UserId", targetUserId) then
         return
     end
 
@@ -521,7 +525,6 @@ function RoundService:_handleTag(tagger, targetUserId)
     end
 
     local distance = (taggerRoot.Position - targetRoot.Position).Magnitude
-    -- Bots don't need network tolerance, but keep it consistent
     if distance > Constants.TAG_RANGE * Constants.TAG_RANGE_TOLERANCE then
         return
     end
@@ -533,67 +536,63 @@ function RoundService:_handleTag(tagger, targetUserId)
         return
     end
 
-    -- Perform the tag
-    self._roundState.TaggedPlayers[targetUserId] = true
+    -- Role swap: old tagger becomes runner, tagged runner becomes tagger
     self._tagCooldowns[tagger.UserId] = now
-    print("[RoundService]", tagger.Name, "tagged", targetParticipant.Name)
+    print("[RoundService]", tagger.Name, "tagged", targetParticipant.Name, "- roles swapped!")
 
     -- Update round stats
     if self._roundStats[tagger.UserId] then
         self._roundStats[tagger.UserId].tagsPerformed = self._roundStats[tagger.UserId].tagsPerformed + 1
     end
 
-    -- Freeze the tagged participant
-    self:_freezePlayer(targetParticipant)
+    -- Increment tag count
+    self._roundState.tagCount = self._roundState.tagCount + 1
 
-    -- Stop AI for tagged bot runners
+    -- Move old tagger from Taggers → Runners
+    Utils.RemoveByKey(self._roundState.Taggers, "UserId", tagger.UserId)
+    table.insert(self._roundState.Runners, tagger)
+    self:_setWalkSpeed(tagger, Constants.DEFAULT_WALK_SPEED)
+
+    -- Move tagged runner from Runners → Taggers
+    Utils.RemoveByKey(self._roundState.Runners, "UserId", targetUserId)
+    table.insert(self._roundState.Taggers, targetParticipant)
+    self:_setWalkSpeed(targetParticipant, Constants.DEFAULT_WALK_SPEED + Constants.TAGGER_SPEED_BOOST)
+
+    -- Set immunity for new tagger
+    self._roundState.immuneUntil[targetParticipant.UserId] = now + Constants.TAG_SWAP_IMMUNITY
+
+    -- Handle bot role swaps
+    if isBot(tagger) then
+        BotService:SwapRole(tagger, Constants.ROLES.RUNNER, self._roundState)
+    end
     if isBot(targetParticipant) then
-        BotService:StopAI(targetParticipant)
+        BotService:SwapRole(targetParticipant, Constants.ROLES.TAGGER, self._roundState)
     end
 
-    -- Notify all real clients
+    -- Build client state once (avoids 3 redundant rebuilds)
+    local clientRoundState = self:_getClientRoundState()
+
+    -- Fire individual role assignments to affected real players
+    self:_fireClient(tagger, {
+        phase = Constants.PHASES.PLAYING,
+        role = Constants.ROLES.RUNNER,
+        roundState = clientRoundState,
+    })
+    self:_fireClient(targetParticipant, {
+        phase = Constants.PHASES.PLAYING,
+        role = Constants.ROLES.TAGGER,
+        roundState = clientRoundState,
+    })
+
+    -- Broadcast tag event to ALL clients
     self._roundStateEvent:FireAllClients({
         phase = Constants.PHASES.PLAYING,
         tagEvent = {
             tagger = tagger.UserId,
             tagged = targetUserId,
         },
-        roundState = self:_getClientRoundState(),
+        roundState = clientRoundState,
     })
-end
-
-function RoundService:_freezePlayer(participant)
-    if not participant.Character then
-        return
-    end
-
-    local humanoidRootPart = participant.Character:FindFirstChild("HumanoidRootPart")
-    if humanoidRootPart then
-        humanoidRootPart.Anchored = true
-    end
-
-    -- Unfreeze after FREEZE_DURATION and transition to spectator
-    -- Minimal rig bots (IsMinimalRig) stay anchored since they use PivotTo movement
-    task.delay(Constants.FREEZE_DURATION, function()
-        if not participant.Character then
-            return
-        end
-        local isMinimalRigBot = isBot(participant) and participant.IsMinimalRig
-        if not isMinimalRigBot then
-            local root = participant.Character:FindFirstChild("HumanoidRootPart")
-            if root then
-                root.Anchored = false
-            end
-        end
-
-        -- Transition tagged player to spectator role (real players only)
-        if not isBot(participant) and self._currentPhase == Constants.PHASES.PLAYING then
-            self:_fireClient(participant, {
-                phase = Constants.PHASES.PLAYING,
-                role = Constants.ROLES.SPECTATOR,
-            })
-        end
-    end)
 end
 
 function RoundService:_setWalkSpeed(participant, speed)
@@ -612,79 +611,59 @@ function RoundService:_processResults()
         return
     end
 
-    local taggersGone = self:_allTaggersGone()
-    local taggerWon = self:_allRunnersTagged() and not taggersGone
     local scores = {}
+    local bestPoints = -1
+    local winnerId = nil
 
-    -- Calculate tagger scores
-    for _, tagger in ipairs(self._roundState.Taggers) do
-        local stats = self._roundStats[tagger.UserId]
+    -- Score all participants (everyone played both roles during the round)
+    local allParticipants = {}
+    for _, t in ipairs(self._roundState.Taggers) do
+        table.insert(allParticipants, t)
+    end
+    for _, r in ipairs(self._roundState.Runners) do
+        table.insert(allParticipants, r)
+    end
+
+    for _, participant in ipairs(allParticipants) do
+        local stats = self._roundStats[participant.UserId]
         local tagsCount = stats and stats.tagsPerformed or 0
-        local points = tagsCount * Constants.POINTS_PER_TAG
-        local coins = tagsCount * Constants.COINS_PER_TAG + Constants.COINS_PER_ROUND
+        local runnerTime = stats and stats.timeAsRunner or 0
+        local points = (runnerTime * Constants.POINTS_PER_SECOND_ALIVE) + (tagsCount * Constants.POINTS_PER_TAG)
+        local coins = (tagsCount * Constants.COINS_PER_TAG) + Constants.COINS_PER_ROUND
 
-        if taggerWon then
-            coins = coins + Constants.COINS_PER_WIN
+        if points > bestPoints then
+            bestPoints = points
+            winnerId = participant.UserId
         end
 
-        scores[tagger.UserId] = {
-            role = Constants.ROLES.TAGGER,
+        scores[participant.UserId] = {
             tags = tagsCount,
+            timeAsRunner = runnerTime,
             points = points,
             coins = coins,
-            won = taggerWon,
+            won = false, -- Set below for winner
         }
 
         -- Only update persistent data for real players (not bots)
-        if not isBot(tagger) then
-            local data = DataService:GetData(tagger)
+        if not isBot(participant) then
+            local data = DataService:GetData(participant)
             if data then
                 data.Stats.RoundsPlayed = data.Stats.RoundsPlayed + 1
                 data.Stats.TotalTags = data.Stats.TotalTags + tagsCount
                 data.Stats.TotalPoints = data.Stats.TotalPoints + points
-                if taggerWon then
-                    data.Stats.RoundsWonAsTagger = data.Stats.RoundsWonAsTagger + 1
-                end
-                DataService:AddCoins(tagger, coins)
+                DataService:AddCoins(participant, coins)
             end
         end
     end
 
-    -- Calculate runner scores
-    for _, runner in ipairs(self._roundState.Runners) do
-        local stats = self._roundStats[runner.UserId]
-        local survived = stats and stats.survivedSeconds or 0
-        local escaped = not self._roundState.TaggedPlayers[runner.UserId]
-        local points = survived * Constants.POINTS_PER_SECOND_ALIVE
-        local coins = Constants.COINS_PER_ROUND
-
-        if escaped then
-            points = points + Constants.BONUS_LAST_RUNNER
-            coins = coins + Constants.COINS_PER_WIN
-        end
-
-        scores[runner.UserId] = {
-            role = Constants.ROLES.RUNNER,
-            survived = survived,
-            escaped = escaped,
-            points = points,
-            coins = coins,
-            won = escaped,
-        }
-
-        -- Only update persistent data for real players (not bots)
-        if not isBot(runner) then
-            local data = DataService:GetData(runner)
-            if data then
-                data.Stats.RoundsPlayed = data.Stats.RoundsPlayed + 1
-                data.Stats.TotalPoints = data.Stats.TotalPoints + points
-                data.Stats.LongestSurvival = math.max(data.Stats.LongestSurvival, survived)
-                if escaped then
-                    data.Stats.TotalEscapes = data.Stats.TotalEscapes + 1
-                    data.Stats.RoundsWonAsRunner = data.Stats.RoundsWonAsRunner + 1
-                end
-                DataService:AddCoins(runner, coins)
-            end
+    -- Mark the winner
+    if winnerId and scores[winnerId] then
+        scores[winnerId].won = true
+        scores[winnerId].coins = scores[winnerId].coins + Constants.COINS_PER_WIN
+        -- Award bonus coins to winner
+        local winner = self:_findParticipant(winnerId)
+        if winner and not isBot(winner) then
+            DataService:AddCoins(winner, Constants.COINS_PER_WIN)
         end
     end
 
@@ -692,24 +671,17 @@ function RoundService:_processResults()
     self._roundStateEvent:FireAllClients({
         phase = Constants.PHASES.RESULTS,
         results = scores,
-        taggerWon = taggerWon,
     })
 
-    print("[RoundService] Round results:", taggerWon and "Tagger wins!" or "Runners survive!")
+    print("[RoundService] Round complete! Tags:", self._roundState.tagCount, "Winner:", winnerId or "none")
 end
 
-function RoundService:_allRunnersTagged()
+function RoundService:_maxTagsReached()
     if not self._roundState then
         return true
     end
 
-    for _, runner in ipairs(self._roundState.Runners) do
-        if not self._roundState.TaggedPlayers[runner.UserId] then
-            return false
-        end
-    end
-
-    return true
+    return self._roundState.tagCount >= Constants.MAX_TAGS_PER_ROUND
 end
 
 function RoundService:_allTaggersGone()
